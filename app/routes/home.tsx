@@ -1,5 +1,5 @@
 import type {Route} from "./+types/home";
-import {HandTrackPage} from "~/pages/handTrackPage";
+import {HandTrackPage} from "~/pages/hand-track-page";
 
 export function meta({}: Route.MetaArgs) {
   return [
