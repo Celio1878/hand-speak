@@ -1,7 +1,7 @@
 import {Suspense, use, useEffect, useRef, useState} from "react";
-import {DrawingUtils, FilesetResolver, HandLandmarker} from "@mediapipe/tasks-vision";
-import {analyzeHandSign} from "~/components/libras-logic"; // Your existing logic
-import {processTranscription} from "~/components/transcription-engine"; // The new file above
+import {DrawingUtils, FilesetResolver, HandLandmarker, type NormalizedLandmark} from "@mediapipe/tasks-vision";
+import {analyzeHandSign, analyzeWordGesture, type GestureToken} from "~/components/libras-logic"; // Gesture logic
+import {processTranscription} from "~/components/transcription-engine"; // Transcription engine
 
 // --- Resource Initialization ---
 let landmarkerPromise: Promise<HandLandmarker> | null = null;
@@ -53,6 +53,7 @@ function WebcamWriter() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>(null);
+  const historyRef = useRef<NormalizedLandmark[][]>([]);
   // const lastPredictionTime = useRef<number>(0);
 
   useEffect(() => {
@@ -100,7 +101,7 @@ function WebcamWriter() {
       const drawingUtils = new DrawingUtils(ctx);
 
       // 1. Check for Hand
-      let detectedChar = null;
+      let detectedToken: GestureToken | null = null;
 
       if (result.landmarks && result.landmarks.length > 0) {
         const landmarks = result.landmarks[0];
@@ -113,14 +114,25 @@ function WebcamWriter() {
         });
         drawingUtils.drawLandmarks(landmarks, {color: "#FF0000", lineWidth: 1});
 
-        // Get Raw Letter from your Logic
-        const gesture = analyzeHandSign(landmarks, handedness);
-        if (gesture) detectedChar = gesture.letter;
+        // Maintain a short history of landmarks for motion-based word gestures
+        const hist = historyRef.current;
+        hist.push(landmarks);
+        if (hist.length > 24) hist.shift(); // ~400ms at 60fps
+
+        // 1) Try direct WORD gesture
+        const wordToken = analyzeWordGesture(hist, handedness);
+        if (wordToken) {
+          detectedToken = wordToken;
+        } else {
+          // 2) Fallback to LETTER detection for current frame
+          const letterToken = analyzeHandSign(landmarks, handedness);
+          if (letterToken) detectedToken = letterToken;
+        }
       }
 
       // 2. Process Transcription (Hold-to-Type Logic)
       // We update state 60fps for smooth progress bar, but logic handles timing
-      const {currentLetter, progress, confirmedLetter} = processTranscription(detectedChar);
+      const {currentLetter, progress, confirmedLetter, confirmedWord} = processTranscription(detectedToken);
 
       setActiveLetter(currentLetter);
       setLockProgress(progress);
@@ -130,6 +142,13 @@ function WebcamWriter() {
         setTranscript((prev) => prev + confirmedLetter);
         // Optional: Add haptic feedback here
         if (navigator.vibrate) navigator.vibrate(50);
+      }
+      if (confirmedWord) {
+        setTranscript((prev) => {
+          const needsSpace = prev.length > 0 && !prev.endsWith(" ");
+          return (needsSpace ? prev + " " : prev) + confirmedWord + " ";
+        });
+        if (navigator.vibrate) navigator.vibrate(80);
       }
     }
 

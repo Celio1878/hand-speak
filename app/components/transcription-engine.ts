@@ -1,50 +1,92 @@
 // TranscriptionEngine.ts
+import type {GestureToken} from "./libras-logic";
 
-export const HOLD_DURATION = 1200; // ms to hold before typing
+// Faster confirmation to match conversational speed
+export const HOLD_DURATION = 400; // ms to hold before typing
+const EARLY_LOCK_MS = 250; // if confidence is high, lock earlier
+const HIGH_CONFIDENCE = 0.90;
 
-type TranscriptionState = {
-  currentLetter: string | null;
+export type TranscriptionState = {
+  currentLetter: string | null; // letter/number being held right now (for UI ring)
   progress: number; // 0 to 100
-  confirmedLetter: string | null; // Returns the letter ONLY when confirmed
+  confirmedLetter: string | null; // emitted when a letter/number locks-in
+  confirmedWord?: string | null; // emitted immediately when a word gesture is detected
 };
 
 let lastLetter: string | null = null;
 let holdStartTime: number = 0;
 
-export function processTranscription(detectedLetter: string | null): TranscriptionState {
+// Word cooldown to avoid repeating the same word each frame
+let lastWord: string | null = null;
+let lastWordTime = 0;
+const WORD_COOLDOWN = 700; // ms
+
+export function processTranscription(token: GestureToken | null): TranscriptionState {
   const now = performance.now();
 
-  // Case 1: Hand lost or gesture stopped
-  if (!detectedLetter) {
-    lastLetter = null;
-    return {currentLetter: null, progress: 0, confirmedLetter: null};
+  // No detection
+  if (!token) {
+    // Do not reset holdStartTime to preserve progress briefly; but clear currentLetter UI
+    return {currentLetter: null, progress: 0, confirmedLetter: null, confirmedWord: null};
   }
 
-  // Case 2: New letter detected (different from previous)
+  if (token.type === "WORD") {
+    // Immediate confirmation with cooldown
+    if (token.value === lastWord && now - lastWordTime < WORD_COOLDOWN) {
+      return {currentLetter: null, progress: 0, confirmedLetter: null, confirmedWord: null};
+    }
+    lastWord = String(token.value);
+    lastWordTime = now;
+    return {currentLetter: null, progress: 0, confirmedLetter: null, confirmedWord: String(token.value)};
+  }
+
+  // Handle NUMBER type (convert to string for display)
+  if (token.type === "NUMBER") {
+    token.value = String(token.value);
+  }
+
+  // Letter/Number logic with hold-to-type
+  const detectedLetter = String(token.value);
+
+  if (!detectedLetter) {
+    return {currentLetter: null, progress: 0, confirmedLetter: null, confirmedWord: null};
+  }
+
   if (detectedLetter !== lastLetter) {
     lastLetter = detectedLetter;
     holdStartTime = now; // Reset timer
-    return {currentLetter: detectedLetter, progress: 0, confirmedLetter: null};
+    return {currentLetter: detectedLetter, progress: 0, confirmedLetter: null, confirmedWord: null};
   }
 
-  // Case 3: Holding the SAME letter
   const elapsed = now - holdStartTime;
   const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
 
+  // Early lock path for very confident, stable detections
+  if (token.confidence >= HIGH_CONFIDENCE && elapsed >= EARLY_LOCK_MS) {
+    holdStartTime = now + 300; // small debounce
+    return {
+      currentLetter: detectedLetter,
+      progress: Math.max(progress, 100),
+      confirmedLetter: detectedLetter,
+      confirmedWord: null,
+    };
+  }
+
   if (elapsed >= HOLD_DURATION) {
-    // RESET after confirm so we don't type "AAAA" continuously
-    // We force the user to slightly release or wait (simple debounce)
-    holdStartTime = now + 500; // Add a small delay before next register
+    // Reset after confirm so we don't type repeatedly; require slight delay
+    holdStartTime = now + 400; // debounce window
     return {
       currentLetter: detectedLetter,
       progress: 100,
-      confirmedLetter: detectedLetter
+      confirmedLetter: detectedLetter,
+      confirmedWord: null,
     };
   }
 
   return {
     currentLetter: detectedLetter,
-    progress: progress,
-    confirmedLetter: null
+    progress,
+    confirmedLetter: null,
+    confirmedWord: null,
   };
 }
