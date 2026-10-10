@@ -2,20 +2,15 @@ import { useState } from "react";
 import {
   FREE_DAILY_CREDITS,
   PRO_PRICE_BRL,
-  getCustomApiKey,
   getRemainingCredits,
-  getSelectedModel,
   getSelectedTone,
   isProUser,
-  setCustomApiKey,
   setProUser,
-  setSelectedModel,
   setSelectedTone,
 } from "./freemium-service";
 import {
   Sparkles,
   CheckCircle2,
-  Key,
   X,
   Zap,
   Sliders,
@@ -29,34 +24,18 @@ interface FreemiumModalProps {
 }
 
 export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps) {
-  const [apiKeyInput, setApiKeyInput] = useState(getCustomApiKey());
-  const [keySaved, setKeySaved] = useState(false);
   const [proStatus, setLocalProStatus] = useState(isProUser());
-  const [selectedModel, setLocalModel] = useState(getSelectedModel());
   const [selectedTone, setLocalTone] = useState(getSelectedTone());
 
   if (!isOpen) return null;
 
   const credits = getRemainingCredits();
-  const isPro = proStatus || Boolean(apiKeyInput.trim());
-
-  const handleSaveKey = () => {
-    setCustomApiKey(apiKeyInput);
-    setKeySaved(true);
-    setTimeout(() => setKeySaved(false), 2500);
-    if (onUpdate) onUpdate();
-  };
+  const isPro = proStatus;
 
   const handleTogglePro = () => {
     const next = !proStatus;
     setProUser(next);
     setLocalProStatus(next);
-    if (onUpdate) onUpdate();
-  };
-
-  const handleModelChange = (model: string) => {
-    setSelectedModel(model);
-    setLocalModel(model);
     if (onUpdate) onUpdate();
   };
 
@@ -77,15 +56,15 @@ export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps)
             </div>
             <div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                Inteligência Gemini & Planos
+                Planos & Preferências
                 {isPro && (
                   <span className="px-2 py-0.5 text-xs font-semibold bg-amber-500 text-white rounded-full">
-                    PRO / BYOK
+                    PRO ⚡
                   </span>
                 )}
               </h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Modelo selecionado: <strong className="text-teal-600 dark:text-teal-400">{selectedModel}</strong>
+                Gerencie sua assinatura e personalize os parâmetros de tradução
               </p>
             </div>
           </div>
@@ -137,15 +116,15 @@ export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps)
                 <ul className="mt-3 space-y-2 text-xs text-gray-600 dark:text-gray-300">
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                    Visão MediaPipe 3D local ilimitada
+                    Rastreamento 3D de Libras em tempo real ilimitado
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                    Voz e escuta nativa (Web Speech)
+                    Interface 100% visual com cards de Libras e chat em tempo real
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                    15 refinamentos Gemini diários
+                    15 traduções inteligentes com IA diárias
                   </li>
                 </ul>
               </div>
@@ -163,7 +142,7 @@ export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps)
                 <ul className="mt-3 space-y-2 text-xs text-gray-700 dark:text-gray-200">
                   <li className="flex items-center gap-2">
                     <Zap className="w-4 h-4 text-teal-500 shrink-0" />
-                    Gemini 3.8 Flash ilimitado
+                    Traduções inteligentes com IA ilimitadas
                   </li>
                   <li className="flex items-center gap-2">
                     <Zap className="w-4 h-4 text-teal-500 shrink-0" />
@@ -178,80 +157,26 @@ export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps)
             </div>
           </div>
 
-          {/* Opção BYOK (Bring Your Own Key) */}
-          <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/60 border border-dashed border-gray-300 dark:border-gray-700">
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
-              <Key className="w-4 h-4 text-amber-500" />
-              <span>Opção Grátis Ilimitada: Use sua chave pessoal (BYOK)</span>
-            </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Cole sua chave gratuita obtida no{" "}
-              <a
-                href="https://aistudio.google.com/app/apikey"
-                target="_blank"
-                rel="noreferrer"
-                className="text-teal-600 dark:text-teal-400 underline font-medium"
-              >
-                Google AI Studio
-              </a>{" "}
-              para desbloquear IA ilimitada sem assinar o Pro.
-            </p>
-            <div className="mt-3 flex gap-2">
-              <input
-                type="password"
-                placeholder="Ex: AIzaSy..."
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                className="flex-1 px-3 py-2 text-xs font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500"
-              />
-              <button
-                onClick={handleSaveKey}
-                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg transition shrink-0"
-              >
-                {keySaved ? "Salva!" : "Salvar Chave"}
-              </button>
-            </div>
-          </div>
-
-          {/* Configurações de Modelo e Tom */}
+          {/* Configurações de Tom de Conversa */}
           <div className="space-y-4 pt-2 border-t border-gray-100 dark:border-gray-800">
             <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
               <Sliders className="w-4 h-4 text-teal-600" />
-              <span>Parâmetros de Tradução da IA</span>
+              <span>Personalização da Tradução</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Seletor de Modelo */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
-                  Modelo Gemini:
-                </label>
-                <select
-                  value={selectedModel}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-teal-500"
-                >
-                  <option value="gemini-3.8-flash">Gemini 3.8 Flash (Padrão Recomendado)</option>
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (Profundo & Técnico)</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Ultra Estável)</option>
-                </select>
-              </div>
-
-              {/* Seletor de Tom */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
-                  Tom da Conversa:
-                </label>
-                <select
-                  value={selectedTone}
-                  onChange={(e) => handleToneChange(e.target.value as "casual" | "formal" | "emergency")}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-teal-500"
-                >
-                  <option value="casual">Casual (Amigável & Dia a dia)</option>
-                  <option value="formal">Formal (Trabalho & Atendimento)</option>
-                  <option value="emergency">Emergência (Hospital & Socorro)</option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
+                Tom da Conversa:
+              </label>
+              <select
+                value={selectedTone}
+                onChange={(e) => handleToneChange(e.target.value as "casual" | "formal" | "emergency")}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-teal-500"
+              >
+                <option value="casual">Casual (Amigável & Dia a dia)</option>
+                <option value="formal">Formal (Trabalho & Atendimento)</option>
+                <option value="emergency">Emergência (Hospital & Socorro)</option>
+              </select>
             </div>
           </div>
         </div>
@@ -260,7 +185,7 @@ export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps)
         <div className="p-4 bg-gray-50 dark:bg-gray-800/80 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
             <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <span>Dados de câmera processados no seu dispositivo</span>
+            <span>Processamento local de câmera no seu dispositivo</span>
           </div>
           <button
             onClick={onClose}

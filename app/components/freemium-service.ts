@@ -3,13 +3,21 @@ export const FREE_DAILY_CREDITS = 15;
 export const PRO_PRICE_BRL = "R$ 9,90";
 
 const STORAGE_KEYS = {
-  CREDITS: "handspeak_gemini_credits",
+  CREDITS: "handspeak_ai_credits",
   LAST_DATE: "handspeak_last_credit_date",
   IS_PRO: "handspeak_is_pro",
-  BYOK_KEY: "handspeak_custom_api_key",
   MODEL: "handspeak_selected_model",
   TONE: "handspeak_selected_tone",
 };
+
+// Limpeza automática de chaves residuais legadas
+if (typeof window !== "undefined") {
+  try {
+    localStorage.removeItem("handspeak_custom_api_key");
+  } catch {
+    // Ignora erro de storage
+  }
+}
 
 function getTodayString(): string {
   return new Date().toISOString().split("T")[0];
@@ -17,13 +25,13 @@ function getTodayString(): string {
 
 export function getRemainingCredits(): number {
   if (typeof window === "undefined") return FREE_DAILY_CREDITS;
-  if (isProUser() || Boolean(getCustomApiKey())) return 999;
+  if (isProUser()) return 999;
 
   const today = getTodayString();
   const lastDate = localStorage.getItem(STORAGE_KEYS.LAST_DATE);
 
   if (lastDate !== today) {
-    // Reset for new day
+    // Renovação diária
     localStorage.setItem(STORAGE_KEYS.LAST_DATE, today);
     localStorage.setItem(STORAGE_KEYS.CREDITS, String(FREE_DAILY_CREDITS));
     return FREE_DAILY_CREDITS;
@@ -35,7 +43,7 @@ export function getRemainingCredits(): number {
 
 export function useCredit(): boolean {
   if (typeof window === "undefined") return true;
-  if (isProUser() || Boolean(getCustomApiKey())) return true;
+  if (isProUser()) return true;
 
   const current = getRemainingCredits();
   if (current <= 0) return false;
@@ -56,23 +64,11 @@ export function setProUser(status: boolean): void {
 }
 
 export function getCustomApiKey(): string {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem(STORAGE_KEYS.BYOK_KEY) || "";
-}
-
-export function setCustomApiKey(key: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEYS.BYOK_KEY, key.trim());
+  return "";
 }
 
 export function getSelectedModel(): string {
-  if (typeof window === "undefined") return "gemini-3.8-flash";
-  return localStorage.getItem(STORAGE_KEYS.MODEL) || "gemini-3.8-flash";
-}
-
-export function setSelectedModel(model: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEYS.MODEL, model);
+  return "gemini-3.8-flash";
 }
 
 export function getSelectedTone(): "casual" | "formal" | "emergency" {

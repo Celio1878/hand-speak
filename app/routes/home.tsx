@@ -7,7 +7,7 @@ export function meta({}: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Tradução bidirecional inteligente entre Libras e Português falado com IA Google Gemini.",
+        "Tradução bidirecional inteligente entre Libras e Português falado com Inteligência Artificial avançada.",
     },
   ];
 }

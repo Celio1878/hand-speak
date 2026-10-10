@@ -26,19 +26,14 @@ export const links: Route.LinksFunction = () => [
 
 export function Layout({ children }: { children: ReactNode }) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" suppressHydrationWarning>
       <head>
-        <title>HandSpeak - Tradutor de Libras em Tempo Real</title>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
-        <meta
-          name="description"
-          content="Tradução bidirecional inteligente entre Libras e Português falado com IA Google Gemini."
-        />
         <Meta />
         <Links />
       </head>
-      <body className="antialiased min-h-screen">
+      <body className="antialiased min-h-screen" suppressHydrationWarning>
         {children}
         <ScrollRestoration />
         <Scripts />

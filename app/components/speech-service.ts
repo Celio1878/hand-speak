@@ -128,3 +128,109 @@ export function startSpeechRecognition(
     return () => {};
   }
 }
+
+// --- Gravação de Áudio via MediaRecorder (Cross-Browser / Firefox) ---
+export function isAudioRecordingSupported(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  return Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined";
+}
+
+export type AudioRecorderHandle = {
+  stop: () => void;
+};
+
+export function startAudioRecording(
+  onRecorded: (blob: Blob) => void,
+  onError: (error: string) => void,
+  maxDurationSeconds = 30
+): Promise<AudioRecorderHandle> {
+  if (!isAudioRecordingSupported()) {
+    onError("Gravação de áudio não suportada neste dispositivo.");
+    return Promise.reject(new Error("Audio recording unsupported"));
+  }
+
+  // Tenta encontrar o melhor MIME type suportado pelo navegador
+  const mimeTypes = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+    "audio/mp4",
+  ];
+  const supportedMimeType = mimeTypes.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+
+  return navigator.mediaDevices
+    .getUserMedia({ audio: true })
+    .then((stream) => {
+      let recorder: MediaRecorder;
+      try {
+        recorder = supportedMimeType
+          ? new MediaRecorder(stream, { mimeType: supportedMimeType })
+          : new MediaRecorder(stream);
+      } catch {
+        recorder = new MediaRecorder(stream);
+      }
+
+      const chunks: BlobPart[] = [];
+      let timeoutId: number | null = null;
+      let isCleanedUp = false;
+
+      const cleanup = () => {
+        if (isCleanedUp) return;
+        isCleanedUp = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        cleanup();
+        const finalType = recorder.mimeType || supportedMimeType || "audio/webm";
+        const blob = new Blob(chunks, { type: finalType });
+        if (blob.size > 0) {
+          onRecorded(blob);
+        } else {
+          onError("Nenhum áudio foi capturado.");
+        }
+      };
+
+      recorder.onerror = () => {
+        cleanup();
+        onError("Erro durante a gravação de áudio.");
+      };
+
+      recorder.start();
+
+      // Temporizador de segurança
+      timeoutId = window.setTimeout(() => {
+        if (recorder.state === "recording") {
+          recorder.stop();
+        }
+      }, maxDurationSeconds * 1000);
+
+      return {
+        stop: () => {
+          if (recorder.state === "recording") {
+            recorder.stop();
+          } else {
+            cleanup();
+          }
+        },
+      };
+    })
+    .catch((err: unknown) => {
+      const errorObj = err as { name?: string };
+      const errMsg =
+        errorObj.name === "NotAllowedError" || errorObj.name === "PermissionDeniedError"
+          ? "Permissão de microfone negada. Autorize o microfone para continuar."
+          : "Não foi possível acessar o microfone.";
+      onError(errMsg);
+      throw err;
+    });
+}
+

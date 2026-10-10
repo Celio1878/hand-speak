@@ -1,8 +1,8 @@
 import type { GestureToken } from "./libras-logic";
 
-export const DEFAULT_HOLD_DURATION = 420; // ms de sustentação para travar letra
-const EARLY_LOCK_MS = 260;
-const HIGH_CONFIDENCE = 0.92;
+export const DEFAULT_HOLD_DURATION = 320; // ms de sustentação para travar letra (otimizado e ágil)
+const EARLY_LOCK_MS = 200; // ms para trava antecipada com alta confiança
+const HIGH_CONFIDENCE = 0.90;
 
 export type TranscriptionState = {
   currentSign: string | null; // Símbolo atual sendo sustentado
@@ -78,7 +78,7 @@ export function processTranscription(
 
   // Trava antecipada para alta confiança e estabilidade
   if (token.confidence >= HIGH_CONFIDENCE && elapsed >= EARLY_LOCK_MS) {
-    holdStartTime = now + 350; // Debounce
+    holdStartTime = now + 280; // Debounce otimizado
     return {
       currentSign: detectedSign,
       progress: 100,
@@ -90,7 +90,7 @@ export function processTranscription(
 
   // Trava regular ao atingir a duração
   if (elapsed >= holdDurationMs) {
-    holdStartTime = now + 400; // Debounce window
+    holdStartTime = now + 300; // Debounce window
     return {
       currentSign: detectedSign,
       progress: 100,

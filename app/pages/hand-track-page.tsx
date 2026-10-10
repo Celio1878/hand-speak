@@ -1,4 +1,13 @@
-import { Suspense, use, useEffect, useRef, useState, useTransition } from "react";
+import {
+  Component,
+  Suspense,
+  use,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
 import {
   DrawingUtils,
   FilesetResolver,
@@ -11,6 +20,7 @@ import {
   type GestureToken,
   type RecognitionMode,
 } from "~/components/libras-logic";
+import { smoothLandmarks } from "~/components/libras-geometry";
 import {
   processTranscription,
   resetTranscriptionEngine,
@@ -20,17 +30,12 @@ import {
   QUICK_PHRASES,
 } from "~/components/portuguese-dictionary";
 import {
-  speakText,
-  startSpeechRecognition,
-  isSpeechRecognitionSupported,
-} from "~/components/speech-service";
-import {
   refineWithGemini,
   reverseTranslateToLibras,
+  sanitizeNaturalPortuguese,
 } from "~/components/gemini-service";
 import {
   getRemainingCredits,
-  getSelectedModel,
   getSelectedTone,
   isProUser,
 } from "~/components/freemium-service";
@@ -39,12 +44,14 @@ import {
   LIBRAS_GUIDE_ITEMS,
   type LibrasGuideItem,
 } from "~/components/libras-dictionary-data";
+import { AnatomicalAssistantWidget } from "~/components/anatomical-assistant-widget";
+import { autoCorrectBufferWord } from "~/components/libras-disambiguation-service";
+import { RoomJoinModal } from "~/components/room-join-modal";
+import { P2PVideoCallModal } from "~/components/p2p-video-call-modal";
 import {
   Camera,
   CameraOff,
-  Mic,
-  MicOff,
-  Volume2,
+  Sun,
   Sparkles,
   Delete,
   Space,
@@ -54,10 +61,32 @@ import {
   BookOpen,
   Check,
   Copy,
+  AlertTriangle,
+  RotateCcw,
+  Send,
+  Video,
 } from "lucide-react";
 
-// --- Singleton de Inicialização do HandLandmarker ---
+// --- Singleton e Carregador Resiliente do HandLandmarker ---
 let landmarkerPromise: Promise<HandLandmarker> | null = null;
+
+export function resetHandLandmarker(): void {
+  landmarkerPromise = null;
+}
+
+async function resolveVisionFileset() {
+  // 1. Tenta carregar o WASM localmente da pasta /wasm (offline-first, sem CORS)
+  try {
+    return await FilesetResolver.forVisionTasks("/wasm");
+  } catch (localWasmErr) {
+    console.warn("WASM local não disponível em /wasm, usando CDN como fallback:", localWasmErr);
+  }
+
+  // 2. Fallback para CDN com a versão exata do pacote instalado (@mediapipe/tasks-vision@0.10.22-rc.20250304)
+  return await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm"
+  );
+}
 
 function getHandLandmarker(): Promise<HandLandmarker> {
   if (typeof window === "undefined") {
@@ -66,15 +95,14 @@ function getHandLandmarker(): Promise<HandLandmarker> {
 
   if (!landmarkerPromise) {
     landmarkerPromise = (async () => {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
-      );
+      const vision = await resolveVisionFileset();
 
-      // Tenta carregar o modelo local primeiro, com fallback para o Google Storage
       const localModelPath = "/models/hand_landmarker.task";
       const remoteModelPath =
         "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
+      // Estratégia de 4 camadas: Local GPU -> Local CPU -> Remoto GPU -> Remoto CPU
+      // Camada 1: Modelo local com aceleração GPU
       try {
         return await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
@@ -82,10 +110,34 @@ function getHandLandmarker(): Promise<HandLandmarker> {
             delegate: "GPU",
           },
           runningMode: "VIDEO",
-          numHands: 2, // Suporte a 2 MÃOS
+          numHands: 2,
+          minHandDetectionConfidence: 0.6,
+          minHandPresenceConfidence: 0.6,
+          minTrackingConfidence: 0.6,
         });
-      } catch (localErr) {
-        console.warn("Falha no modelo local, usando fallback remoto:", localErr);
+      } catch (gpuErr) {
+        console.warn("Falha ao inicializar modelo local na GPU, tentando CPU:", gpuErr);
+      }
+
+      // Camada 2: Modelo local com processamento CPU
+      try {
+        return await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: localModelPath,
+            delegate: "CPU",
+          },
+          runningMode: "VIDEO",
+          numHands: 2,
+          minHandDetectionConfidence: 0.6,
+          minHandPresenceConfidence: 0.6,
+          minTrackingConfidence: 0.6,
+        });
+      } catch (localCpuErr) {
+        console.warn("Falha no modelo local, tentando modelo remoto na GPU:", localCpuErr);
+      }
+
+      // Camada 3: Modelo remoto com aceleração GPU
+      try {
         return await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: remoteModelPath,
@@ -93,11 +145,93 @@ function getHandLandmarker(): Promise<HandLandmarker> {
           },
           runningMode: "VIDEO",
           numHands: 2,
+          minHandDetectionConfidence: 0.6,
+          minHandPresenceConfidence: 0.6,
+          minTrackingConfidence: 0.6,
         });
+      } catch (remoteGpuErr) {
+        console.warn("Falha no modelo remoto na GPU, tentando modelo remoto na CPU:", remoteGpuErr);
       }
+
+      // Camada 4: Modelo remoto com processamento CPU
+      return await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: remoteModelPath,
+          delegate: "CPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+        minHandDetectionConfidence: 0.6,
+        minHandPresenceConfidence: 0.6,
+        minTrackingConfidence: 0.6,
+      });
     })();
   }
   return landmarkerPromise;
+}
+
+// --- Error Boundary Dedicado para a Estação de Visão ---
+interface VisionErrorBoundaryProps {
+  children: ReactNode;
+  onRetry: () => void;
+}
+
+interface VisionErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class VisionErrorBoundary extends Component<VisionErrorBoundaryProps, VisionErrorBoundaryState> {
+  constructor(props: VisionErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): VisionErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("VisionErrorBoundary capturou erro de visão:", error, errorInfo);
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false, error: null });
+    this.props.onRetry();
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col items-center justify-center p-6 text-center">
+          <div className="max-w-md w-full bg-white dark:bg-gray-900 border border-red-200 dark:border-red-900/60 rounded-3xl p-6 shadow-xl">
+            <div className="w-14 h-14 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle className="w-8 h-8" />
+            </div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
+              Não foi possível iniciar o rastreador de Libras
+            </h2>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mb-4 leading-relaxed">
+              Ocorreu uma falha ao inicializar o motor de visão computacional e rastreamento de Libras. Verifique se o seu navegador suporta aceleração por hardware (WebGL) e se os modelos locais estão ativos.
+            </p>
+            {this.state.error && (
+              <div className="text-[11px] font-mono text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 p-3 rounded-xl mb-5 text-left break-all max-h-28 overflow-y-auto border border-red-200 dark:border-red-900/40">
+                {this.state.error.message || String(this.state.error)}
+              </div>
+            )}
+            <button
+              onClick={this.handleRetry}
+              className="w-full py-3 px-4 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-bold text-sm rounded-xl shadow-md transition flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Tentar Novamente
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // Mensagem no histórico bilingue
@@ -112,10 +246,16 @@ type ChatMessage = {
 
 export function HandTrackPage() {
   const [mounted, setMounted] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const handleRetry = () => {
+    resetHandLandmarker();
+    setRetryKey((k) => k + 1);
+  };
 
   if (!mounted) {
     return (
@@ -127,18 +267,20 @@ export function HandTrackPage() {
   }
 
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col items-center justify-center p-4">
-          <div className="w-10 h-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="mt-4 text-sm font-semibold text-gray-600 dark:text-gray-300">
-            Carregando Inteligência de Libras (MediaPipe & Gemini)...
-          </p>
-        </div>
-      }
-    >
-      <ConversationalStation />
-    </Suspense>
+    <VisionErrorBoundary key={retryKey} onRetry={handleRetry}>
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col items-center justify-center p-4">
+            <div className="w-10 h-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+            <p className="mt-4 text-sm font-semibold text-gray-600 dark:text-gray-300">
+              Carregando Inteligência de Libras...
+            </p>
+          </div>
+        }
+      >
+        <ConversationalStation />
+      </Suspense>
+    </VisionErrorBoundary>
   );
 }
 
@@ -150,20 +292,26 @@ function ConversationalStation() {
   const [mode, setMode] = useState<RecognitionMode>("WORDS");
   const [activeSign, setActiveSign] = useState<string | null>(null);
   const [lockProgress, setLockProgress] = useState(0);
+  const [contrastEnhanced, setContrastEnhanced] = useState(false);
+  const [trackingQuality, setTrackingQuality] = useState<"stable" | "adjusting" | "idle">("idle");
 
   // Estados de Transcrição e Diálogo
   const [transcript, setTranscript] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isAiRefining, setIsAiRefining] = useState(false);
-  const [autoSpeak, setAutoSpeak] = useState(false);
 
-  // Estados de Escuta do Ouvinte
-  const [isListening, setIsListening] = useState(false);
+  // Estados do Diálogo do Interlocutor (Texto -> Libras)
+  const [listenerInputText, setListenerInputText] = useState("");
   const [listenerText, setListenerText] = useState("");
   const [listenerGlosses, setListenerGlosses] = useState<string[]>([]);
 
   // Linha do Tempo e Histórico
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  // Aba lateral ativa: "dialogue" ou "assistant"
+  const [activeSideTab, setActiveSideTab] = useState<"dialogue" | "assistant">("dialogue");
+  const [assistantText, setAssistantText] = useState("");
+  const [autoCorrectToast, setAutoCorrectToast] = useState<string | null>(null);
 
   // Modais
   const [isFreemiumOpen, setIsFreemiumOpen] = useState(false);
@@ -171,10 +319,17 @@ function ConversationalStation() {
   const [guideFilter, setGuideFilter] = useState<"todos" | "alfabeto" | "sinais">("todos");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Estados de Chamada de Vídeo P2P (WebRTC 100% Frontend)
+  const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
+  const [isCallModalOpen, setIsCallModalOpen] = useState(false);
+  const [callRoomCode, setCallRoomCode] = useState("");
+  const [isCallHost, setIsCallHost] = useState(false);
+  const [callLocalStream, setCallLocalStream] = useState<MediaStream | null>(null);
+  const [initialRoomFromUrl, setInitialRoomFromUrl] = useState("");
+
   // Informações de IA e Cotas
   const [credits, setCredits] = useState(getRemainingCredits());
   const [isPro, setIsPro] = useState(isProUser());
-  const [currentModel, setCurrentModel] = useState(getSelectedModel());
   const [, startTransition] = useTransition();
 
   // Refs de Mídia
@@ -182,19 +337,83 @@ function ConversationalStation() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | null>(null);
   const historyRef = useRef<NormalizedLandmark[][]>([]);
-  const stopListeningRef = useRef<(() => void) | null>(null);
+  const previousLandmarksRef = useRef<NormalizedLandmark[][]>([]);
 
   useEffect(() => {
+    // Detecta parâmetro de sala na URL (?room=HS-XXXX) para entrar automaticamente
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = params.get("room");
+      if (roomParam) {
+        setInitialRoomFromUrl(roomParam.toUpperCase());
+        setIsRoomModalOpen(true);
+      }
+    }
+
     return () => {
       stopCamera();
-      if (stopListeningRef.current) stopListeningRef.current();
     };
   }, []);
 
   const refreshFreemiumStatus = () => {
     setCredits(getRemainingCredits());
     setIsPro(isProUser());
-    setCurrentModel(getSelectedModel());
+  };
+
+  const handleStartHost = async (roomCode: string) => {
+    setIsRoomModalOpen(false);
+    let stream = videoRef.current?.srcObject as MediaStream | null;
+    if (!stream || !stream.active) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 60, min: 30 },
+            facingMode: "user",
+          },
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.addEventListener("loadeddata", predictWebcam);
+          setWebcamRunning(true);
+        }
+      } catch (err) {
+        console.error("Falha ao abrir câmera para chamada:", err);
+      }
+    }
+    setCallLocalStream(stream);
+    setCallRoomCode(roomCode);
+    setIsCallHost(true);
+    setIsCallModalOpen(true);
+  };
+
+  const handleJoinRoom = async (roomCode: string) => {
+    setIsRoomModalOpen(false);
+    let stream = videoRef.current?.srcObject as MediaStream | null;
+    if (!stream || !stream.active) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 60, min: 30 },
+            facingMode: "user",
+          },
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.addEventListener("loadeddata", predictWebcam);
+          setWebcamRunning(true);
+        }
+      } catch (err) {
+        console.error("Falha ao abrir câmera para chamada:", err);
+      }
+    }
+    setCallLocalStream(stream);
+    setCallRoomCode(roomCode);
+    setIsCallHost(false);
+    setIsCallModalOpen(true);
   };
 
   function stopCamera() {
@@ -206,6 +425,8 @@ function ConversationalStation() {
     resetTranscriptionEngine();
     setActiveSign(null);
     setLockProgress(0);
+    setTrackingQuality("idle");
+    previousLandmarksRef.current = [];
   }
 
   async function toggleWebcam() {
@@ -219,6 +440,7 @@ function ConversationalStation() {
           video: {
             width: { ideal: 1280 },
             height: { ideal: 720 },
+            frameRate: { ideal: 60, min: 30 },
             facingMode: "user",
           },
         });
@@ -254,8 +476,23 @@ function ConversationalStation() {
       let detectedToken: GestureToken | null = null;
 
       if (result.landmarks && result.landmarks.length > 0) {
-        // Desenha até 2 mãos com cores diferenciadas
-        result.landmarks.forEach((landmarks, idx) => {
+        // Suavização anti-jitter temporal (EMA) para estabilização das falanges
+        const smoothedLandmarks = result.landmarks.map((rawHand, idx) => {
+          const prev = previousLandmarksRef.current[idx] || null;
+          return smoothLandmarks(rawHand, prev, 0.72);
+        });
+        previousLandmarksRef.current = smoothedLandmarks;
+
+        // Avalia qualidade de rastreamento com base na confiança do MediaPipe
+        const primaryScore = result.handedness[0]?.[0]?.score ?? 0;
+        if (primaryScore >= 0.75) {
+          setTrackingQuality("stable");
+        } else {
+          setTrackingQuality("adjusting");
+        }
+
+        // Desenha até 2 mãos com cores diferenciadas usando os landmarks suavizados
+        smoothedLandmarks.forEach((landmarks, idx) => {
           const handedness = result.handedness[idx]?.[0]?.displayName || "Hand";
           const isRight = handedness === "Right";
           const connectorColor = isRight ? "rgba(0, 229, 255, 0.7)" : "rgba(245, 158, 11, 0.7)";
@@ -273,19 +510,22 @@ function ConversationalStation() {
         });
 
         // Histórico temporal de movimento da mão primária
-        const primaryHand = result.landmarks[0];
+        const primaryHand = smoothedLandmarks[0];
         const hist = historyRef.current;
         hist.push(primaryHand);
         if (hist.length > 24) hist.shift();
 
-        // 1. Verifica gestos dinâmicos com movimento (Oi, Z)
+        // 1. Verifica gestos dinâmicos com movimento (Oi, Z, J)
         const motionToken = analyzeMotionGesture(hist, result.handedness[0]?.[0]);
         if (motionToken) {
           detectedToken = motionToken;
         } else {
           // 2. Analisa sinal estático (2 mãos ou 1 mão) com respeito ao modo atual
-          detectedToken = analyzeLibrasFrame(result.landmarks, result.handedness, mode);
+          detectedToken = analyzeLibrasFrame(smoothedLandmarks, result.handedness, mode);
         }
+      } else {
+        previousLandmarksRef.current = [];
+        setTrackingQuality("idle");
       }
 
       // Processa confirmação pelo motor de transcrição
@@ -320,9 +560,6 @@ function ConversationalStation() {
           const needsSpace = prev.length > 0 && !prev.endsWith(" ");
           const next = (needsSpace ? prev + " " : prev) + confirmedWord + " ";
           updateSuggestions(next);
-          if (autoSpeak) {
-            speakText(confirmedWord);
-          }
           return next;
         });
         if (navigator.vibrate) navigator.vibrate(80);
@@ -344,9 +581,46 @@ function ConversationalStation() {
     }
   }
 
+  // Autocorreção Semântica por Inatividade (~1.2s após última soletração)
+  useEffect(() => {
+    if (!transcript) return;
+    const trimmed = transcript.trim();
+    if (!trimmed || transcript.endsWith(" ")) return;
+
+    const timer = setTimeout(() => {
+      const words = trimmed.split(" ");
+      const lastWord = words[words.length - 1] || "";
+      if (lastWord.length >= 2) {
+        const { correctedWord, wasCorrected } = autoCorrectBufferWord(lastWord);
+        if (wasCorrected && correctedWord !== lastWord) {
+          words[words.length - 1] = correctedWord;
+          setTranscript(words.join(" "));
+          setAutoCorrectToast(`✨ Corrigido com IA: ${lastWord} → ${correctedWord}`);
+          setTimeout(() => setAutoCorrectToast(null), 3000);
+        }
+      }
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [transcript]);
+
   // Ações de Edição do Sinalizador
   const handleSpace = () => {
-    setTranscript((t) => t + " ");
+    setTranscript((t) => {
+      const trimmed = t.trim();
+      const words = trimmed.split(" ");
+      const lastWord = words[words.length - 1] || "";
+      if (lastWord.length >= 2) {
+        const { correctedWord, wasCorrected } = autoCorrectBufferWord(lastWord);
+        if (wasCorrected && correctedWord !== lastWord) {
+          words[words.length - 1] = correctedWord;
+          setAutoCorrectToast(`✨ Corrigido com IA: ${lastWord} → ${correctedWord}`);
+          setTimeout(() => setAutoCorrectToast(null), 3000);
+          return words.join(" ") + " ";
+        }
+      }
+      return t + " ";
+    });
     setSuggestions([]);
   };
 
@@ -370,10 +644,9 @@ function ConversationalStation() {
       return words.join(" ") + " ";
     });
     setSuggestions([]);
-    if (autoSpeak) speakText(word);
   };
 
-  // Refinamento de Frase com Google Gemini
+  // Refinamento de Frase com IA
   const handleRefineWithGemini = async () => {
     if (!transcript.trim()) return;
 
@@ -385,11 +658,10 @@ function ConversationalStation() {
     refreshFreemiumStatus();
 
     if (res.naturalPortuguese) {
-      const refined = res.naturalPortuguese;
+      const refined = sanitizeNaturalPortuguese(res.naturalPortuguese);
       setTranscript(refined);
-      if (autoSpeak) speakText(refined);
 
-      // Adiciona à linha do tempo
+      // Adiciona à linha do tempo da conversa
       const newMsg: ChatMessage = {
         id: String(Date.now()),
         sender: "signer",
@@ -401,10 +673,9 @@ function ConversationalStation() {
     }
   };
 
-  // Enviar fala para a linha do tempo e reproduzir áudio
-  const handleSpeakAndSend = () => {
+  // Enviar texto de Libras para a linha do tempo (100% visual)
+  const handleSendTranscript = () => {
     if (!transcript.trim()) return;
-    speakText(transcript);
 
     const newMsg: ChatMessage = {
       id: String(Date.now()),
@@ -416,9 +687,8 @@ function ConversationalStation() {
     setTranscript("");
   };
 
-  // Enviar frase rápida
+  // Enviar frase rápida para a linha do tempo
   const handleSendQuickPhrase = (phrase: string) => {
-    speakText(phrase);
     const newMsg: ChatMessage = {
       id: String(Date.now()),
       sender: "signer",
@@ -428,39 +698,26 @@ function ConversationalStation() {
     setMessages((m) => [...m, newMsg]);
   };
 
-  // Escuta do Ouvinte (STT)
-  const toggleListening = () => {
-    if (isListening) {
-      if (stopListeningRef.current) stopListeningRef.current();
-      setIsListening(false);
-    } else {
-      setIsListening(true);
-      const stopFn = startSpeechRecognition(
-        async (recognizedText, isFinal) => {
-          setListenerText(recognizedText);
-          if (isFinal) {
-            // Tradução reversa para Libras
-            const revRes = await reverseTranslateToLibras(recognizedText);
-            const glosses = revRes.librasGlosses || recognizedText.toUpperCase().split(" ");
-            setListenerGlosses(glosses);
+  const handleListenerTextSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!listenerInputText.trim()) return;
 
-            const newMsg: ChatMessage = {
-              id: String(Date.now()),
-              sender: "listener",
-              text: recognizedText,
-              rawGlosses: glosses,
-              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            };
-            setMessages((m) => [...m, newMsg]);
-          }
-        },
-        (error) => {
-          console.error("Erro STT:", error);
-          setIsListening(false);
-        }
-      );
-      stopListeningRef.current = stopFn;
-    }
+    const text = listenerInputText.trim();
+    setListenerInputText("");
+    setListenerText(text);
+
+    const revRes = await reverseTranslateToLibras(text);
+    const glosses = revRes.librasGlosses || text.toUpperCase().split(" ");
+    setListenerGlosses(glosses);
+
+    const newMsg: ChatMessage = {
+      id: String(Date.now()),
+      sender: "listener",
+      text,
+      rawGlosses: glosses,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+    setMessages((m) => [...m, newMsg]);
   };
 
   const copyToClipboard = (id: string, text: string) => {
@@ -503,6 +760,29 @@ function ConversationalStation() {
             >
               <Sparkles className="w-3.5 h-3.5 text-teal-600" />
               <span>{isPro ? "PRO ⚡" : `${credits} IA`}</span>
+            </button>
+
+            {/* Chamada de Vídeo P2P */}
+            <button
+              onClick={() => setIsRoomModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-sm hover:brightness-110 transition cursor-pointer"
+              title="Iniciar ou Entrar em Chamada de Vídeo P2P"
+            >
+              <Video className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Vídeo Chamada P2P</span>
+            </button>
+
+            {/* Assistente Anatômico 3D */}
+            <button
+              onClick={() => setActiveSideTab((prev) => (prev === "assistant" ? "dialogue" : "assistant"))}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition border ${
+                activeSideTab === "assistant"
+                  ? "bg-cyan-600 text-white border-cyan-500 shadow-sm"
+                  : "bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border-cyan-200 dark:border-cyan-800"
+              }`}
+            >
+              <span>🦾</span>
+              <span className="hidden sm:inline">Assistente 3D</span>
             </button>
 
             {/* Guia de Libras */}
@@ -556,7 +836,9 @@ function ConversationalStation() {
               autoPlay
               playsInline
               muted
-              className="absolute inset-0 w-full h-full object-cover transform -scale-x-100"
+              className={`absolute inset-0 w-full h-full object-cover transform -scale-x-100 transition-all duration-300 ${
+                contrastEnhanced ? "contrast-125 brightness-110 saturate-110" : ""
+              }`}
             />
             <canvas
               ref={canvasRef}
@@ -593,15 +875,65 @@ function ConversationalStation() {
               </div>
             )}
 
-            {/* BOTÃO DE FECHAR CÂMERA */}
+            {/* CONTROLES DE IMAGEM & FECHAR CÂMERA */}
             {webcamRunning && (
-              <button
-                onClick={toggleWebcam}
-                className="absolute top-3 right-3 z-30 p-2 bg-black/60 backdrop-blur-md text-white/80 hover:text-white rounded-xl border border-white/10 transition"
-                title="Pausar câmera"
-              >
-                <CameraOff className="w-4 h-4" />
-              </button>
+              <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
+                <button
+                  onClick={() => setContrastEnhanced((v) => !v)}
+                  className={`p-2 rounded-xl backdrop-blur-md border transition ${
+                    contrastEnhanced
+                      ? "bg-amber-500 text-white border-amber-400 shadow-md"
+                      : "bg-black/60 text-white/80 hover:text-white border-white/10"
+                  }`}
+                  title={
+                    contrastEnhanced
+                      ? "Desativar modo de alto contraste"
+                      : "Ativar modo de alto contraste para baixa iluminação"
+                  }
+                >
+                  <Sun className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={toggleWebcam}
+                  className="p-2 bg-black/60 backdrop-blur-md text-white/80 hover:text-white rounded-xl border border-white/10 transition"
+                  title="Pausar câmera"
+                >
+                  <CameraOff className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* GUIA VISUAL DE ENQUADRAMENTO DAS MÃOS */}
+            {webcamRunning && trackingQuality === "idle" && (
+              <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center p-6">
+                <div className="w-[75%] h-[80%] border-2 border-dashed border-teal-400/30 rounded-3xl flex items-end justify-center pb-4 transition-all">
+                  <span className="text-[11px] font-medium text-teal-300/80 bg-black/50 px-3 py-1 rounded-full backdrop-blur-sm border border-teal-400/20">
+                    Posicione as mãos nesta área central
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* INDICADOR DE QUALIDADE DE RASTREAMENTO */}
+            {webcamRunning && (
+              <div className="absolute bottom-3 left-3 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-md border border-white/15 text-[11px] font-semibold text-white shadow-md">
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    trackingQuality === "stable"
+                      ? "bg-emerald-400 animate-pulse ring-2 ring-emerald-400/40"
+                      : trackingQuality === "adjusting"
+                      ? "bg-amber-400"
+                      : "bg-gray-400"
+                  }`}
+                />
+                <span>
+                  {trackingQuality === "stable"
+                    ? "Rastreamento Estável (60 FPS)"
+                    : trackingQuality === "adjusting"
+                    ? "Ajuste a iluminação/enquadramento"
+                    : "Aguardando mãos na câmera..."}
+                </span>
+              </div>
             )}
 
             {/* ANEL DE CONFIRMAÇÃO DO SINAL DETECTADO */}
@@ -680,6 +1012,14 @@ function ConversationalStation() {
               <span className="w-2.5 h-7 bg-teal-500 ml-1 animate-pulse rounded-sm"></span>
             </div>
 
+            {/* TOAST SUTIL DE AUTOCORREÇÃO INTELIGENTE */}
+            {autoCorrectToast && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300 text-xs font-semibold animate-fade-in shadow-sm">
+                <Sparkles className="w-3.5 h-3.5 text-teal-500" />
+                <span>{autoCorrectToast}</span>
+              </div>
+            )}
+
             {/* SUGESTÕES PREDITIVAS */}
             {suggestions.length > 0 && (
               <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -699,36 +1039,25 @@ function ConversationalStation() {
             {/* AÇÕES DE VOZ E IA */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
               <div className="flex items-center gap-2">
-                {/* Botão Refinar com Gemini */}
+                {/* Botão Refinar com IA */}
                 <button
                   onClick={handleRefineWithGemini}
                   disabled={isAiRefining || !transcript.trim()}
                   className="px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-600 text-white text-xs font-bold rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition flex items-center gap-1.5"
                 >
                   <Sparkles className="w-4 h-4" />
-                  {isAiRefining ? "Refinando com IA..." : `Refinar com ${currentModel}`}
+                  {isAiRefining ? "Refinando com IA..." : "Refinar Frase com IA"}
                 </button>
-
-                {/* Auto Falar Toggle */}
-                <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={autoSpeak}
-                    onChange={(e) => setAutoSpeak(e.target.checked)}
-                    className="rounded text-teal-600 focus:ring-teal-500"
-                  />
-                  <span>Falar automático</span>
-                </label>
               </div>
 
-              {/* Botão Falar em Voz Alta */}
+              {/* Botão Enviar para o Diálogo (Visual) */}
               <button
-                onClick={handleSpeakAndSend}
+                onClick={handleSendTranscript}
                 disabled={!transcript.trim()}
                 className="px-5 py-2 bg-gray-900 dark:bg-teal-500 text-white dark:text-gray-950 text-xs font-extrabold rounded-xl shadow hover:bg-black transition flex items-center gap-2 disabled:opacity-40"
               >
-                <Volume2 className="w-4 h-4" />
-                Falar em Voz Alta
+                <Send className="w-4 h-4" />
+                Enviar para a Conversa
               </button>
             </div>
           </div>
@@ -761,146 +1090,210 @@ function ConversationalStation() {
           </div>
         </section>
 
-        {/* COLUNA DIREITA: OUVIINTE & DIÁLOGO BILINGUE (5 Colunas) */}
-        <section className="lg:col-span-5 flex flex-col gap-5">
-          {/* PAINEL DO OUVINTE (FALA COM MICROFONE) */}
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-md border border-gray-200 dark:border-gray-800 p-5 flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400 flex items-center gap-1.5">
-                <span>🗣️</span> Resposta do Ouvinte
-              </span>
-              <span className="text-[10px] text-gray-400">Microfone em Português</span>
-            </div>
-
-            {/* BOTÃO GRANDE DE GRAVAÇÃO */}
-            <div className="flex flex-col items-center justify-center p-6 bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-800/40 dark:to-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 text-center">
-              <button
-                onClick={toggleListening}
-                className={`w-20 h-20 rounded-full flex items-center justify-center text-white shadow-xl transition-all ${
-                  isListening
-                    ? "bg-red-500 scale-110 animate-pulse ring-4 ring-red-300 dark:ring-red-900"
-                    : "bg-gradient-to-tr from-cyan-600 to-teal-500 hover:scale-105"
-                }`}
-                aria-label={isListening ? "Parar de ouvir" : "Iniciar escuta do ouvinte"}
-              >
-                {isListening ? <MicOff className="w-8 h-8" /> : <Mic className="w-8 h-8" />}
-              </button>
-              <p className="mt-3 text-sm font-bold text-gray-800 dark:text-gray-200">
-                {isListening ? "Ouvindo... Fale agora!" : "Toque no microfone para falar"}
-              </p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                A fala do ouvinte será transcrita em texto e cards de Libras
-              </p>
-            </div>
-
-            {/* ÚLTIMA FALA CAPTURADA */}
-            {listenerText && (
-              <div className="p-4 rounded-xl bg-cyan-50/50 dark:bg-cyan-950/20 border border-cyan-200 dark:border-cyan-800">
-                <p className="text-xs text-cyan-700 dark:text-cyan-300 font-bold uppercase tracking-wider mb-1">
-                  Texto Falado Capturado:
-                </p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white">{listenerText}</p>
-              </div>
-            )}
-
-            {/* TRADUÇÃO REVERSA EM GLOSSAS DE LIBRAS */}
-            {listenerGlosses.length > 0 && (
-              <div>
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                  Tradução em Sinais de Libras:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {listenerGlosses.map((gloss, idx) => (
-                    <span
-                      key={idx}
-                      className="px-3 py-1 bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 font-black text-xs rounded-lg border border-amber-300 dark:border-amber-700 shadow-sm"
-                    >
-                      {gloss}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
+        {/* COLUNA DIREITA: DIÁLOGO BILINGUE 100% VISUAL & ASSISTENTE ANATÔMICO 3D (5 Colunas) */}
+        <section className="lg:col-span-5 flex flex-col gap-4">
+          {/* SELETOR DE ABA DA COLUNA DIREITA */}
+          <div className="flex items-center gap-1.5 p-1 bg-gray-200/70 dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700/60 shadow-inner">
+            <button
+              onClick={() => setActiveSideTab("dialogue")}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+                activeSideTab === "dialogue"
+                  ? "bg-white dark:bg-gray-900 text-teal-600 dark:text-teal-400 shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Diálogo em Tempo Real</span>
+            </button>
+            <button
+              onClick={() => setActiveSideTab("assistant")}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+                activeSideTab === "assistant"
+                  ? "bg-white dark:bg-gray-900 text-cyan-600 dark:text-cyan-400 shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              <span>🦾</span>
+              <span>Assistente Anatômico 3D</span>
+            </button>
           </div>
 
-          {/* HISTÓRICO DA CONVERSA (CHAT BILINGUE) */}
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-md border border-gray-200 dark:border-gray-800 p-5 flex flex-col flex-1">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800 mb-3">
-              <h3 className="font-bold text-sm text-gray-800 dark:text-gray-200 flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-teal-600" /> Diálogo da Conversa
-              </h3>
-              {messages.length > 0 && (
-                <button
-                  onClick={() => setMessages([])}
-                  className="text-xs text-gray-400 hover:text-red-500 transition"
-                >
-                  Limpar Diálogo
-                </button>
-              )}
-            </div>
-
-            <div className="space-y-3 overflow-y-auto max-h-[380px] pr-1">
-              {messages.length === 0 ? (
-                <div className="text-center py-10 text-gray-400 text-xs italic">
-                  Nenhuma mensagem ainda. Inicie a conversa por Libras ou pelo microfone!
+          {activeSideTab === "assistant" ? (
+            <AnatomicalAssistantWidget
+              initialText={assistantText}
+              onClose={() => setActiveSideTab("dialogue")}
+            />
+          ) : (
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-md border border-gray-200 dark:border-gray-800 p-5 flex flex-col flex-1 min-h-[580px]">
+              {/* Cabeçalho do Diálogo */}
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800 mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400">
+                    <MessageSquare className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                      Diálogo em Tempo Real
+                    </h3>
+                    <p className="text-[10px] text-gray-400">
+                      Libras (Câmera) ⇄ Texto Digitado
+                    </p>
+                  </div>
                 </div>
-              ) : (
-                messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${
-                      msg.sender === "signer" ? "items-start" : "items-end"
-                    }`}
-                  >
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold px-2.5 py-0.5 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 rounded-full border border-teal-200 dark:border-teal-800">
+                    100% Visual
+                  </span>
+                  {messages.length > 0 && (
+                    <button
+                      onClick={() => setMessages([])}
+                      className="text-xs text-gray-400 hover:text-red-500 transition p-1"
+                      title="Limpar Diálogo"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* ÁREA DE MENSAGENS (CHAT COM ROLAGEM) */}
+              <div className="space-y-3 overflow-y-auto flex-1 min-h-[260px] max-h-[380px] pr-1 py-1">
+                {messages.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center py-12 text-center text-gray-400 dark:text-gray-500">
+                    <div className="w-12 h-12 rounded-2xl bg-gray-50 dark:bg-gray-800/60 flex items-center justify-center text-2xl mb-2">
+                      💬
+                    </div>
+                    <p className="text-xs font-semibold">Nenhuma mensagem ainda.</p>
+                    <p className="text-[11px] mt-0.5">
+                      Sinalize em Libras para a câmera ou digite uma resposta abaixo!
+                    </p>
+                  </div>
+                ) : (
+                  messages.map((msg) => (
                     <div
-                      className={`max-w-[90%] p-3.5 rounded-2xl shadow-sm text-sm relative ${
-                        msg.sender === "signer"
-                          ? "bg-teal-50 dark:bg-teal-950/40 text-gray-900 dark:text-teal-100 border border-teal-200 dark:border-teal-800 rounded-tl-none"
-                          : "bg-cyan-600 text-white rounded-tr-none"
+                      key={msg.id}
+                      className={`flex flex-col ${
+                        msg.sender === "signer" ? "items-start" : "items-end"
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-4 mb-1 text-[10px] font-semibold opacity-75">
-                        <span>{msg.sender === "signer" ? "🤟 Sinalizador (Libras)" : "🗣️ Ouvinte"}</span>
-                        <span>{msg.timestamp}</span>
-                      </div>
-                      <p className="font-medium text-base">{msg.text}</p>
-
-                      {msg.rawGlosses && (
-                        <div className="mt-2 pt-2 border-t border-white/20 flex flex-wrap gap-1">
-                          {msg.rawGlosses.map((g, i) => (
-                            <span key={i} className="text-[10px] px-1.5 py-0.5 bg-black/20 rounded font-bold">
-                              {g}
-                            </span>
-                          ))}
+                      <div
+                        className={`max-w-[90%] p-3.5 rounded-2xl shadow-sm text-sm relative ${
+                          msg.sender === "signer"
+                            ? "bg-teal-50 dark:bg-teal-950/40 text-gray-900 dark:text-teal-100 border border-teal-200 dark:border-teal-800 rounded-tl-none"
+                            : "bg-cyan-600 text-white rounded-tr-none"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-4 mb-1 text-[10px] font-semibold opacity-75">
+                          <span>{msg.sender === "signer" ? "🤟 Sinalizador (Libras)" : "✍️ Resposta Digitada"}</span>
+                          <span>{msg.timestamp}</span>
                         </div>
-                      )}
+                        <p className="font-medium text-base">{msg.text}</p>
 
-                      <div className="mt-2 flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => speakText(msg.text)}
-                          className="p-1 hover:opacity-80 transition"
-                          title="Ouvir novamente"
-                        >
-                          <Volume2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => copyToClipboard(msg.id, msg.text)}
-                          className="p-1 hover:opacity-80 transition"
-                          title="Copiar texto"
-                        >
-                          {copiedId === msg.id ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                        </button>
+                        {msg.rawGlosses && (
+                          <div className="mt-2 pt-2 border-t border-white/20 flex flex-wrap gap-1">
+                            {msg.rawGlosses.map((g, i) => (
+                              <button
+                                key={i}
+                                onClick={() => {
+                                  setAssistantText(g);
+                                  setActiveSideTab("assistant");
+                                }}
+                                className="text-[10px] px-1.5 py-0.5 bg-black/20 hover:bg-black/40 rounded font-bold transition flex items-center gap-0.5"
+                                title="Ver no Assistente 3D"
+                              >
+                                <span>{g}</span>
+                                <span className="opacity-75">🦾</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => {
+                              setAssistantText(msg.text);
+                              setActiveSideTab("assistant");
+                            }}
+                            className="p-1 hover:opacity-80 transition text-cyan-600 dark:text-cyan-300"
+                            title="Demonstrar sinal no Assistente Anatômico 3D"
+                            aria-label="Demonstrar sinal no Assistente Anatômico 3D"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(msg.id, msg.text)}
+                            className="p-1 hover:opacity-80 transition"
+                            title="Copiar texto"
+                          >
+                            {copiedId === msg.id ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
+                  ))
+                )}
+              </div>
+
+              {/* CARDS VISUAIS DE LIBRAS DA ÚLTIMA RESPOSTA DIGITADA */}
+              {listenerGlosses.length > 0 && (
+                <div className="p-3 my-2 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <span>🤟</span> Sinais de Libras da Resposta:
+                    </p>
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                      Toque para ver em 3D 🦾
+                    </span>
                   </div>
-                ))
+                  <div className="flex flex-wrap gap-1.5">
+                    {listenerGlosses.map((gloss, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          setAssistantText(gloss);
+                          setActiveSideTab("assistant");
+                        }}
+                        className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/50 dark:hover:bg-amber-900/80 text-amber-950 dark:text-amber-200 font-black text-xs rounded-lg border border-amber-300 dark:border-amber-700 shadow-sm transition flex items-center gap-1 cursor-pointer"
+                        title={`Visualizar anatomia 3D de: ${gloss}`}
+                      >
+                        <span>{gloss}</span>
+                        <span className="text-[10px] opacity-75">🦾</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
+
+              {/* DOCK DE DIGITAÇÃO NO RODAPÉ DO CHAT */}
+              <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex flex-col gap-2">
+                <form onSubmit={handleListenerTextSubmit} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={listenerInputText}
+                    onChange={(e) => setListenerInputText(e.target.value)}
+                    placeholder="Digite sua mensagem para a pessoa surda..."
+                    className="flex-1 px-4 py-2.5 text-xs bg-gray-50 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 shadow-inner"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!listenerInputText.trim()}
+                    className="px-4 py-2.5 bg-gradient-to-r from-teal-500 to-cyan-600 hover:brightness-110 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow transition flex items-center gap-1.5 shrink-0"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Enviar</span>
+                  </button>
+                </form>
+                <div className="flex items-center justify-between text-[10px] text-gray-400 px-1">
+                  <span>Pressione Enter para enviar</span>
+                  <span>Gera cards e reprodução 3D de Libras</span>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </section>
       </main>
 
@@ -972,7 +1365,20 @@ function ConversationalStation() {
                       )}
                     </div>
                     <p className="text-xs text-gray-700 dark:text-gray-300 mb-1.5">{item.description}</p>
-                    <p className="text-[11px] text-gray-500 italic">💡 {item.visualTip}</p>
+                    <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+                      <p className="text-[11px] text-gray-500 italic">💡 {item.visualTip}</p>
+                      <button
+                        onClick={() => {
+                          setAssistantText(item.id);
+                          setIsGuideOpen(false);
+                          setActiveSideTab("assistant");
+                        }}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border border-cyan-200 dark:border-cyan-800 transition flex items-center gap-1 shrink-0"
+                      >
+                        <span>🦾</span>
+                        <span>Ver no 3D</span>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -995,6 +1401,36 @@ function ConversationalStation() {
         isOpen={isFreemiumOpen}
         onClose={() => setIsFreemiumOpen(false)}
         onUpdate={refreshFreemiumStatus}
+      />
+
+      {/* --- MODAIS DE VÍDEO CHAMADA P2P (WEBRTC 100% FRONTEND) --- */}
+      <RoomJoinModal
+        isOpen={isRoomModalOpen}
+        onClose={() => setIsRoomModalOpen(false)}
+        onStartHost={handleStartHost}
+        onJoinRoom={handleJoinRoom}
+        initialRoomCode={initialRoomFromUrl}
+      />
+
+      <P2PVideoCallModal
+        isOpen={isCallModalOpen}
+        roomCode={callRoomCode}
+        isHost={isCallHost}
+        localStream={callLocalStream}
+        currentLocalTranscript={transcript}
+        onClose={() => {
+          setIsCallModalOpen(false);
+          setCallRoomCode("");
+        }}
+        onSendTranscript={(text) => {
+          const newMsg: ChatMessage = {
+            id: String(Date.now()),
+            sender: "listener",
+            text,
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          };
+          setMessages((m) => [...m, newMsg]);
+        }}
       />
     </div>
   );
