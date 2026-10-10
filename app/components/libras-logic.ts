@@ -13,6 +13,8 @@ export type GestureToken = {
   type: "LETTER" | "WORD" | "NUMBER";
   value: string | number;
   confidence: number;
+  alternativeValue?: string; // Símbolo alternativo mais provável em caso de colisão geométrica
+  ambiguityMargin?: number;  // Margem de incerteza anatômica
   twoHands?: boolean;
 };
 
@@ -123,13 +125,31 @@ function analyzeTwoHandGestures(
     if (isOneFist && relationship.distance < 0.6) {
       return { type: "WORD", value: "AJUDA", confidence: 0.88, twoHands: true };
     }
+
+    // SINAL: "FAMILIA" — Ambas as mãos em formato de F tocando-se pelos círculos à frente
+    const leftIsF = metricsLeft.fingerOpen.middle && metricsLeft.fingerOpen.ring && metricsLeft.fingerOpen.pinky;
+    const rightIsF = metricsRight.fingerOpen.middle && metricsRight.fingerOpen.ring && metricsRight.fingerOpen.pinky;
+    if (leftIsF && rightIsF && distance2D(leftHand[8], rightHand[8]) < 0.16) {
+      return { type: "WORD", value: "FAMILIA", confidence: 0.91, twoHands: true };
+    }
+
+    // SINAL: "PAZ" (Duas Mãos) — Ambas as palmas voltadas para baixo se abrindo
+    if (
+      metricsLeft.palmNormal.y > 0.35 &&
+      metricsRight.palmNormal.y > 0.35 &&
+      metricsLeft.fingerOpen.index &&
+      metricsRight.fingerOpen.index &&
+      wristDist > 0.22
+    ) {
+      return { type: "WORD", value: "PAZ", confidence: 0.89, twoHands: true };
+    }
   }
 
   return null;
 }
 
 /**
- * Reconhecimento de Sinais Estáticos de Palavras Únicas (Sim, Não, Água, etc.)
+ * Reconhecimento de Sinais Estáticos de Palavras Únicas (Sim, Não, Água, Eu, Você, etc.)
  */
 function analyzeStaticWordSigns(
   landmarks: NormalizedLandmark[],
@@ -139,10 +159,11 @@ function analyzeStaticWordSigns(
   const metrics = extractHandMetrics(landmarks, isRightHand);
   if (!metrics) return null;
 
-  const { fingerOpen, scale } = metrics;
+  const { fingerOpen, scale, palmNormal } = metrics;
   const thumbTip = landmarks[4];
   const pinkyTip = landmarks[20];
   const indexTip = landmarks[8];
+  const indexMcp = landmarks[5];
 
   // SIM: Polegar erguido ("joinha"), outros dedos fechados
   if (fingerOpen.thumb && !fingerOpen.index && !fingerOpen.middle && !fingerOpen.ring && !fingerOpen.pinky) {
@@ -157,11 +178,40 @@ function analyzeStaticWordSigns(
     return { type: "WORD", value: "NAO", confidence: 0.88 };
   }
 
-  // ÁGUA: Mão em formato L no queixo (ou dedo indicador dobrado suavemente)
+  // EU: Dedo indicador apontado para o próprio peito
+  if (fingerOpen.index && !fingerOpen.middle && !fingerOpen.ring && !fingerOpen.pinky) {
+    if ((indexTip.z || 0) < (landmarks[0].z || 0) - 0.04 && indexTip.y > landmarks[0].y - 0.25) {
+      return { type: "WORD", value: "EU", confidence: 0.90 };
+    }
+  }
+
+  // VOCÊ: Dedo indicador apontado para a frente em direção ao interlocutor
+  if (fingerOpen.index && !fingerOpen.middle && !fingerOpen.ring && !fingerOpen.pinky) {
+    if ((indexTip.z || 0) < (indexMcp.z || 0) - 0.12 && indexTip.y > indexMcp.y - 0.12) {
+      return { type: "WORD", value: "VOCE", confidence: 0.91 };
+    }
+  }
+
+  // ÁGUA: Mão em formato L no queixo
   if (fingerOpen.thumb && fingerOpen.index && !fingerOpen.middle && !fingerOpen.ring && !fingerOpen.pinky) {
     const thumbIndexSpread = distance3D(thumbTip, indexTip) / scale;
     if (thumbIndexSpread > 0.7 && thumbTip.y > landmarks[0].y - 0.2) {
       return { type: "WORD", value: "AGUA", confidence: 0.85 };
+    }
+  }
+
+  // OBRIGADO: Mão aberta estendida projetando para frente
+  if (fingerOpen.index && fingerOpen.middle && fingerOpen.ring && fingerOpen.pinky) {
+    const allTipsApart = distance2D(indexTip, pinkyTip) / scale > 0.70;
+    if (allTipsApart && palmNormal.z > 0.35 && landmarks[0].y < 0.65) {
+      return { type: "WORD", value: "OBRIGADO", confidence: 0.89 };
+    }
+  }
+
+  // AMIGO: Mão tocando o lado esquerdo do peito
+  if (isRightHand && landmarks[0].x < 0.45 && landmarks[0].y > 0.38) {
+    if (!fingerOpen.middle && !fingerOpen.ring && !fingerOpen.pinky) {
+      return { type: "WORD", value: "AMIGO", confidence: 0.86 };
     }
   }
 
@@ -196,18 +246,30 @@ export function analyzeAlphabetSign(
     // A: Punho fechado, polegar erguido ao lado do indicador
     const thumbUpSide = thumbTip.y < indexMcp.y && Math.abs(thumbTip.x - indexMcp.x) < 0.08;
     if (thumbUpSide) {
-      return { type: "LETTER", value: "A", confidence: 0.94 };
+      return {
+        type: "LETTER",
+        value: "A",
+        confidence: 0.94,
+        alternativeValue: "S",
+        ambiguityMargin: 0.05,
+      };
     }
 
     // S: Punho fechado com polegar cruzado horizontalmente sobre os nós dos dedos
     const thumbCrossed = thumbTip.y > indexMcp.y && Math.abs(thumbTip.x - indexMcp.x) < 0.06;
     if (thumbCrossed) {
-      return { type: "LETTER", value: "S", confidence: 0.91 };
+      return {
+        type: "LETTER",
+        value: "S",
+        confidence: 0.91,
+        alternativeValue: "A",
+        ambiguityMargin: 0.05,
+      };
     }
 
     // E: Dedos curvados (garras recolhidas)
     if (fingerFlexions.index > 0.65 && fingerFlexions.middle > 0.65) {
-      return { type: "LETTER", value: "E", confidence: 0.88 };
+      return { type: "LETTER", value: "E", confidence: 0.88, alternativeValue: "C" };
     }
   }
 
@@ -276,11 +338,23 @@ export function analyzeAlphabetSign(
     const tipDist = distance2D(indexTip, middleTip) / scale;
     // U: Indicador e médio unidos e paralelos
     if (tipDist < 0.22) {
-      return { type: "LETTER", value: "U", confidence: 0.92 };
+      return {
+        type: "LETTER",
+        value: "U",
+        confidence: 0.92,
+        alternativeValue: "V",
+        ambiguityMargin: Math.abs(0.22 - tipDist),
+      };
     }
     // V: Indicador e médio separados
     if (tipDist >= 0.25) {
-      return { type: "LETTER", value: "V", confidence: 0.93 };
+      return {
+        type: "LETTER",
+        value: "V",
+        confidence: 0.93,
+        alternativeValue: "U",
+        ambiguityMargin: Math.abs(tipDist - 0.25),
+      };
     }
   }
 
@@ -309,12 +383,24 @@ export function analyzeAlphabetSign(
 
     // F: Polegar encostado por FORA do indicador
     if (thumbIndexTipDist < 0.28 && thumbIndexPipDist > 0.22) {
-      return { type: "LETTER", value: "F", confidence: 0.90 };
+      return {
+        type: "LETTER",
+        value: "F",
+        confidence: 0.90,
+        alternativeValue: "T",
+        ambiguityMargin: 0.06,
+      };
     }
 
     // T: Polegar por DENTRO do indicador
     if (thumbIndexPipDist < 0.24) {
-      return { type: "LETTER", value: "T", confidence: 0.88 };
+      return {
+        type: "LETTER",
+        value: "T",
+        confidence: 0.88,
+        alternativeValue: "F",
+        ambiguityMargin: 0.06,
+      };
     }
   }
 
@@ -327,17 +413,54 @@ export function analyzeAlphabetSign(
     distance3D(thumbTip, pinkyTip) / scale < 0.42;
 
   if (allTipsCloseToThumb && !index && !middle && !ring && !pinky) {
-    return { type: "LETTER", value: "O", confidence: 0.91 };
+    return { type: "LETTER", value: "O", confidence: 0.91, alternativeValue: "C" };
   }
 
   // --- LETRA M vs N ---
   // M: 3 dedos apontando para baixo
   if (indexTip.y > indexMcp.y && middleTip.y > landmarks[9].y && ringTip.y > landmarks[13].y) {
-    return { type: "LETTER", value: "M", confidence: 0.85 };
+    return { type: "LETTER", value: "M", confidence: 0.85, alternativeValue: "N" };
   }
   // N: 2 dedos apontando para baixo
   if (indexTip.y > indexMcp.y && middleTip.y > landmarks[9].y && ringTip.y <= landmarks[13].y) {
-    return { type: "LETTER", value: "N", confidence: 0.86 };
+    return { type: "LETTER", value: "N", confidence: 0.86, alternativeValue: "M" };
+  }
+
+  // --- LETRA G vs Q ---
+  if (index && !middle && !ring && !pinky) {
+    const thumbIndexSpread = distance2D(thumbTip, indexTip) / scale;
+    // G: Indicador esticado para cima e polegar paralelo ao lado
+    if (indexTip.y < indexMcp.y && thumbIndexSpread >= 0.20 && thumbIndexSpread <= 0.60) {
+      return { type: "LETTER", value: "G", confidence: 0.92, alternativeValue: "Q" };
+    }
+    // Q: Indicador e polegar apontando para baixo
+    if (indexTip.y > indexMcp.y && thumbIndexSpread <= 0.65) {
+      return { type: "LETTER", value: "Q", confidence: 0.90, alternativeValue: "G" };
+    }
+  }
+
+  // --- LETRA K vs P vs H ---
+  if (index && middle && !ring && !pinky) {
+    const isHorizontal = Math.abs(indexTip.y - indexMcp.y) < 0.12 && Math.abs(middleTip.y - landmarks[9].y) < 0.12;
+    // H: Indicador e médio esticados na horizontal
+    if (isHorizontal) {
+      return { type: "LETTER", value: "H", confidence: 0.88 };
+    }
+
+    const thumbBetween =
+      isRightHand
+        ? thumbTip.x > indexTip.x && thumbTip.x < middleTip.x
+        : thumbTip.x < indexTip.x && thumbTip.x > middleTip.x;
+
+    // P: Dedos apontando para baixo com polegar entre eles
+    if (indexTip.y > indexMcp.y && (thumbBetween || distance3D(thumbTip, landmarks[6]) / scale < 0.38)) {
+      return { type: "LETTER", value: "P", confidence: 0.89 };
+    }
+
+    // K: Dedos em V para cima com polegar entre indicador e médio
+    if (indexTip.y < indexMcp.y && (thumbBetween || distance3D(thumbTip, landmarks[6]) / scale < 0.38)) {
+      return { type: "LETTER", value: "K", confidence: 0.91 };
+    }
   }
 
   // --- LETRA X ---
@@ -391,6 +514,22 @@ export function analyzeMotionGesture(
 
     if (z_dx1 > 0.07 && z_dx2 < -0.07 && z_dy > 0.08) {
       return { type: "LETTER", value: "Z", confidence: 0.88 };
+    }
+  }
+
+  // Gesto: "J" (Mínimo desenhando anzol no ar)
+  if (n >= 14) {
+    const start = history[n - 14];
+    const mid = history[n - 7];
+    const end = last;
+    const pinkyIdx = 20;
+
+    const j_dyDown = mid[pinkyIdx].y - start[pinkyIdx].y; // descida
+    const j_dxCurve = Math.abs(end[pinkyIdx].x - mid[pinkyIdx].x); // gancho lateral
+    const j_dyUp = mid[pinkyIdx].y - end[pinkyIdx].y; // curva ascendente final
+
+    if (j_dyDown > 0.05 && j_dxCurve > 0.04 && j_dyUp > -0.04) {
+      return { type: "LETTER", value: "J", confidence: 0.90 };
     }
   }
 

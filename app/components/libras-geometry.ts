@@ -193,3 +193,30 @@ export function getTwoHandRelationship(
     bothPalmsFacingEachOther,
   };
 }
+
+/**
+ * Suavização temporal de landmarks via Exponential Moving Average (EMA).
+ * Reduz micro-tremores e ruído do sensor da câmera mantendo latência próxima de zero.
+ * @param current Landmarks detectados no frame atual
+ * @param previous Landmarks suavizados do frame anterior
+ * @param alpha Fator de suavização (0.75 = 75% frame atual, 25% anterior)
+ */
+export function smoothLandmarks(
+  current: NormalizedLandmark[],
+  previous: NormalizedLandmark[] | null,
+  alpha: number = 0.75
+): NormalizedLandmark[] {
+  if (!previous || previous.length !== current.length) {
+    return current;
+  }
+
+  return current.map((p, i) => {
+    const prev = previous[i];
+    return {
+      x: alpha * p.x + (1 - alpha) * prev.x,
+      y: alpha * p.y + (1 - alpha) * prev.y,
+      z: alpha * (p.z ?? 0) + (1 - alpha) * (prev.z ?? 0),
+      visibility: p.visibility !== undefined ? p.visibility : prev.visibility,
+    };
+  });
+}
