@@ -22,8 +22,8 @@ Nas chamadas diretas entre dispositivos diferentes:
 - **Reações Rápidas de Compreensão Mútua**: Botões de 1 toque (`👍 Entendi`, `🔄 Pode repetir?`, `⏳ Um momento...`, `👏 Concordo`, `❓ Dúvida`) com animação e vibração sincronizada em ambos os aparelhos.
 - **Dock de Entrada de Texto**: Permite ao interlocutor enviar respostas com a tecla `Enter` diretamente para a legenda.
 
-## 3. Serviços Legados de Áudio (Preservados em `app/components/speech-service.ts`)
+## 3. Descontinuação de Serviços Legados de Áudio
 
-Caso módulos opcionais venham a oferecer síntese de voz auxiliar sob demanda estrita:
-- Text-to-Speech (TTS): Vozes em `pt-BR` selecionadas preferencialmente por `lang === 'pt-BR'` e `rate: 1.0`.
-- Sempre chamar `window.speechSynthesis.cancel()` antes de novas sentenças.
+Para assegurar acessibilidade universal sem ruídos, falhas de microfone ou dependências de síntese de voz (TTS), o serviço legado `speech-service.ts` foi removido do projeto.
+A plataforma opera estritamente no modelo **100% Visual (Libras -> Texto -> Assistente 3D)**.
+
