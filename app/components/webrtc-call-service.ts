@@ -31,6 +31,47 @@ export type P2PPayload =
 export type CallStatus = "idle" | "connecting" | "connected" | "disconnected" | "error";
 
 /**
+ * Configuração resiliente de ICE com STUN Google e TURN OpenRelay/Metered
+ * Essencial para atravessar NATs simétricos, CGNAT de celulares (4G/5G) e firewalls
+ */
+export const PEER_ICE_CONFIG = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "stun:stun.relay.metered.ca:80" },
+    {
+      urls: "turn:global.relay.metered.ca:80",
+      username: "openrelay",
+      credential: "openrelay",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:80?transport=tcp",
+      username: "openrelay",
+      credential: "openrelay",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443",
+      username: "openrelay",
+      credential: "openrelay",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443?transport=tcp",
+      username: "openrelay",
+      credential: "openrelay",
+    },
+    {
+      urls: "turns:global.relay.metered.ca:443?transport=tcp",
+      username: "openrelay",
+      credential: "openrelay",
+    },
+  ],
+  iceCandidatePoolSize: 10,
+};
+
+/**
  * Gera um código legível de sala de 6 caracteres (ex: HS-8421)
  */
 export function generateRoomCode(): string {
@@ -56,6 +97,7 @@ export interface WebRTCCallCallbacks {
   onRemoteStream?: (stream: MediaStream) => void;
   onDataMessage?: (payload: P2PPayload) => void;
   onCallStatusChange?: (status: CallStatus) => void;
+  onStatusDetailChange?: (detail: string) => void;
   onError?: (errorMessage: string) => void;
 }
 
@@ -72,6 +114,7 @@ export class WebRTCCallService {
   private status: CallStatus = "idle";
   private roomCode: string | null = null;
   private isHost: boolean = false;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(callbacks: WebRTCCallCallbacks) {
     this.callbacks = callbacks;
@@ -83,6 +126,49 @@ export class WebRTCCallService {
   }
 
   /**
+   * Monitora ativamente o RTCPeerConnection para lidar com mudanças de ICE e reiniciar conexão se falhar
+   */
+  private monitorPeerConnection(pc?: RTCPeerConnection) {
+    if (!pc) return;
+
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState;
+      console.log(`[WebRTC ICE State]: ${state}`);
+
+      if (state === "connected" || state === "completed") {
+        this.setStatus("connected");
+        this.callbacks.onStatusDetailChange?.("P2P Conectado");
+      } else if (state === "checking") {
+        this.callbacks.onStatusDetailChange?.("Negociando conexão P2P...");
+      } else if (state === "failed") {
+        console.warn("[WebRTC ICE State] Falha na negociação direta. Tentando reconexão via TURN relay...");
+        this.callbacks.onStatusDetailChange?.("Conectando via retransmissão...");
+        try {
+          if (typeof (pc as any).restartIce === "function") {
+            (pc as any).restartIce();
+          }
+        } catch (e) {
+          console.warn("Erro ao tentar reiniciar ICE:", e);
+        }
+      } else if (state === "disconnected") {
+        this.callbacks.onStatusDetailChange?.("Conexão instável, reconectando...");
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      console.log(`[WebRTC Connection State]: ${state}`);
+      if (state === "connected") {
+        this.setStatus("connected");
+        this.callbacks.onStatusDetailChange?.("P2P Conectado");
+      } else if (state === "failed") {
+        this.setStatus("error");
+        this.callbacks.onError?.("A conexão com o participante foi encerrada.");
+      }
+    };
+  }
+
+  /**
    * Inicializa o anfitrião (cria a sala e aguarda a chamada do interlocutor)
    */
   async startHost(roomCode: string, stream: MediaStream): Promise<void> {
@@ -91,6 +177,7 @@ export class WebRTCCallService {
     this.localStream = stream;
     this.isHost = true;
     this.setStatus("connecting");
+    this.callbacks.onStatusDetailChange?.("Iniciando sala...");
 
     const hostPeerId = `handspeak-room-${this.roomCode.toLowerCase()}`;
 
@@ -102,30 +189,32 @@ export class WebRTCCallService {
 
       this.peer = new Peer(hostPeerId, {
         debug: 1,
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" },
-          ],
-        },
+        pingInterval: 5000,
+        config: PEER_ICE_CONFIG,
       });
 
       this.peer.on("open", () => {
         // Sala aberta e aguardando conexão remota
+        this.callbacks.onStatusDetailChange?.("Aguardando interlocutor...");
       });
 
       // Recebe a chamada de vídeo do participante
       this.peer.on("call", (incomingCall: MediaConnection) => {
         this.currentCall = incomingCall;
+        this.callbacks.onStatusDetailChange?.("Conectando vídeo...");
         incomingCall.answer(this.localStream!);
+
+        this.monitorPeerConnection(incomingCall.peerConnection);
 
         incomingCall.on("stream", (remoteStream: MediaStream) => {
           this.setStatus("connected");
+          this.callbacks.onStatusDetailChange?.("P2P Conectado");
           this.callbacks.onRemoteStream?.(remoteStream);
         });
 
         incomingCall.on("close", () => {
           this.setStatus("disconnected");
+          this.callbacks.onStatusDetailChange?.("Chamada finalizada");
         });
 
         incomingCall.on("error", (err: any) => {
@@ -142,7 +231,7 @@ export class WebRTCCallService {
       this.peer.on("error", (err: any) => {
         console.error("Erro no Peer anfitrião:", err);
         if (err.type === "unavailable-id") {
-          this.callbacks.onError?.("Código de sala já está em uso por outra sessão. Tente gerar um novo.");
+          this.callbacks.onError?.("Código de sala já está em uso por outra sessão ativa. Tente gerar um novo.");
         } else {
           this.callbacks.onError?.(err.message || "Erro ao conectar com o serviço P2P.");
         }
@@ -156,7 +245,7 @@ export class WebRTCCallService {
   }
 
   /**
-   * Conecta a uma sala existente como participante
+   * Conecta a uma sala existente como participante com retentativas automáticas
    */
   async joinRoom(roomCode: string, stream: MediaStream): Promise<void> {
     this.disconnect();
@@ -164,6 +253,7 @@ export class WebRTCCallService {
     this.localStream = stream;
     this.isHost = false;
     this.setStatus("connecting");
+    this.callbacks.onStatusDetailChange?.("Conectando ao servidor...");
 
     const hostPeerId = `handspeak-room-${this.roomCode.toLowerCase()}`;
 
@@ -176,47 +266,90 @@ export class WebRTCCallService {
       // Cria peer com ID aleatório para o participante
       this.peer = new Peer({
         debug: 1,
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" },
-          ],
-        },
+        pingInterval: 5000,
+        config: PEER_ICE_CONFIG,
       });
 
+      let attemptCount = 0;
+      const maxAttempts = 4;
+      let hasReceivedStream = false;
+
+      const attemptConnect = () => {
+        if (!this.peer || this.peer.destroyed || hasReceivedStream) return;
+        attemptCount++;
+
+        this.callbacks.onStatusDetailChange?.(
+          attemptCount > 1
+            ? `Tentando conectar ao anfitrião (${attemptCount}/${maxAttempts})...`
+            : "Conectando à sala..."
+        );
+
+        try {
+          // Abre canal de dados com o host
+          const dataConn = this.peer.connect(hostPeerId, {
+            reliable: true,
+          });
+          this.setupDataConnection(dataConn);
+
+          // Dispara a chamada de vídeo para o host
+          const call = this.peer.call(hostPeerId, this.localStream!);
+          this.currentCall = call;
+
+          if (call) {
+            this.monitorPeerConnection(call.peerConnection);
+
+            call.on("stream", (remoteStream: MediaStream) => {
+              hasReceivedStream = true;
+              this.setStatus("connected");
+              this.callbacks.onStatusDetailChange?.("P2P Conectado");
+              this.callbacks.onRemoteStream?.(remoteStream);
+            });
+
+            call.on("close", () => {
+              this.setStatus("disconnected");
+              this.callbacks.onStatusDetailChange?.("Chamada finalizada");
+            });
+
+            call.on("error", (err: any) => {
+              console.warn(`Tentativa ${attemptCount} de vídeo falhou:`, err);
+              if (attemptCount < maxAttempts && !hasReceivedStream) {
+                if (this.retryTimer) clearTimeout(this.retryTimer);
+                this.retryTimer = setTimeout(attemptConnect, 2000);
+              } else {
+                this.callbacks.onError?.("Falha ao estabelecer transmissão de vídeo com a sala.");
+              }
+            });
+          }
+        } catch (err: any) {
+          console.warn(`Erro ao disparar chamada (tentativa ${attemptCount}):`, err);
+          if (attemptCount < maxAttempts && !hasReceivedStream) {
+            if (this.retryTimer) clearTimeout(this.retryTimer);
+            this.retryTimer = setTimeout(attemptConnect, 2000);
+          }
+        }
+      };
+
       this.peer.on("open", () => {
-        // Abre canal de dados com o host
-        const dataConn = this.peer.connect(hostPeerId, {
-          reliable: true,
-        });
-        this.setupDataConnection(dataConn);
-
-        // Dispara a chamada de vídeo para o host
-        const call = this.peer.call(hostPeerId, this.localStream!);
-        this.currentCall = call;
-
-        call.on("stream", (remoteStream: MediaStream) => {
-          this.setStatus("connected");
-          this.callbacks.onRemoteStream?.(remoteStream);
-        });
-
-        call.on("close", () => {
-          this.setStatus("disconnected");
-        });
-
-        call.on("error", (err: any) => {
-          console.error("Erro na chamada remota:", err);
-          this.callbacks.onError?.("Falha ao estabelecer transmissão de vídeo com a sala.");
-        });
+        attemptConnect();
       });
 
       this.peer.on("error", (err: any) => {
-        console.error("Erro no Peer participante:", err);
+        console.warn("Aviso no Peer participante:", err?.type, err?.message);
         if (err.type === "peer-unavailable") {
-          this.callbacks.onError?.("Sala não encontrada ou o anfitrião não está ativo.");
-        } else {
-          this.callbacks.onError?.(err.message || "Erro ao conectar com a sala.");
+          if (attemptCount < maxAttempts && !hasReceivedStream) {
+            this.callbacks.onStatusDetailChange?.(
+              `Aguardando anfitrião abrir a sala (${attemptCount}/${maxAttempts})...`
+            );
+            if (this.retryTimer) clearTimeout(this.retryTimer);
+            this.retryTimer = setTimeout(attemptConnect, 2000);
+            return;
+          }
+          this.callbacks.onError?.("Sala não encontrada ou o anfitrião ainda não abriu a sala. Verifique o código.");
+          this.setStatus("error");
+          return;
         }
+
+        this.callbacks.onError?.(err.message || "Erro ao conectar com a sala.");
         this.setStatus("error");
       });
     } catch (err: any) {
@@ -233,7 +366,7 @@ export class WebRTCCallService {
     this.currentDataConn = conn;
 
     conn.on("open", () => {
-      this.setStatus("connected");
+      // Data channel pronto
     });
 
     conn.on("data", (data: any) => {
@@ -297,6 +430,11 @@ export class WebRTCCallService {
    * Encerra a chamada e limpa todas as conexões
    */
   disconnect() {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+
     if (this.currentCall) {
       try {
         this.currentCall.close();

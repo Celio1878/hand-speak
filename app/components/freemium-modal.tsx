@@ -46,16 +46,19 @@ export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps)
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-xl bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="relative w-full max-w-xl bg-white dark:bg-gray-900 rounded-t-3xl sm:rounded-2xl shadow-2xl border-t sm:border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[90vh] pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:pb-0">
+        {/* Puxador visual para mobile */}
+        <div className="w-12 h-1.5 bg-gray-300 dark:bg-gray-700 rounded-full mx-auto mt-2.5 sm:hidden" />
+
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-800 bg-gradient-to-r from-teal-500/10 via-cyan-500/10 to-transparent">
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-100 dark:border-gray-800 bg-gradient-to-r from-teal-500/10 via-cyan-500/10 to-transparent">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-teal-500 text-white rounded-xl shadow-md">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 Planos & Preferências
                 {isPro && (
                   <span className="px-2 py-0.5 text-xs font-semibold bg-amber-500 text-white rounded-full">
@@ -63,14 +66,14 @@ export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps)
                   </span>
                 )}
               </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400">
                 Gerencie sua assinatura e personalize os parâmetros de tradução
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+            className="p-2.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
             aria-label="Fechar modal"
           >
             <X className="w-5 h-5" />

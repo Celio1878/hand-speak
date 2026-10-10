@@ -73,10 +73,13 @@ export function RoomJoinModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl border-t sm:border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[85vh] pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:pb-0">
+        {/* Puxador visual para mobile */}
+        <div className="w-12 h-1.5 bg-gray-300 dark:bg-gray-700 rounded-full mx-auto mt-2.5 sm:hidden" />
+
         {/* Cabeçalho */}
-        <div className="p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+        <div className="p-4 sm:p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-teal-500 to-cyan-500 flex items-center justify-center text-white shadow-md">
               <Video className="w-5 h-5" />
@@ -92,7 +95,7 @@ export function RoomJoinModal({
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+            className="p-2.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
             aria-label="Fechar modal"
           >
             <X className="w-4 h-4" />
@@ -104,7 +107,7 @@ export function RoomJoinModal({
           <div className="grid grid-cols-2 gap-1.5 p-1 bg-gray-200/80 dark:bg-gray-800 rounded-2xl">
             <button
               onClick={() => setTab("create")}
-              className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 min-h-[44px] ${
                 tab === "create"
                   ? "bg-white dark:bg-gray-900 text-teal-600 dark:text-teal-400 shadow-sm"
                   : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
@@ -115,7 +118,7 @@ export function RoomJoinModal({
             </button>
             <button
               onClick={() => setTab("join")}
-              className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 min-h-[44px] ${
                 tab === "join"
                   ? "bg-white dark:bg-gray-900 text-cyan-600 dark:text-cyan-400 shadow-sm"
                   : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
@@ -174,7 +177,7 @@ export function RoomJoinModal({
 
             <button
               type="submit"
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-extrabold text-sm rounded-2xl shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full py-3.5 px-4 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white font-extrabold text-sm rounded-2xl shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
             >
               <Video className="w-4 h-4" />
               <span>Abrir Sala e Iniciar Câmera</span>
@@ -183,6 +186,15 @@ export function RoomJoinModal({
         ) : (
           /* Conteúdo da Aba Entrar */
           <form onSubmit={handleJoinSubmit} className="p-5 flex flex-col gap-4">
+            {initialRoomCode && (
+              <div className="p-3 bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-500/30 rounded-2xl flex items-center gap-2.5 text-cyan-800 dark:text-cyan-200 text-xs">
+                <Sparkles className="w-4 h-4 text-cyan-500 shrink-0" />
+                <span>
+                  Você recebeu um convite para entrar na sala <strong>{initialRoomCode}</strong>.
+                </span>
+              </div>
+            )}
+
             <div>
               <label
                 htmlFor="room-code-input"
@@ -208,7 +220,7 @@ export function RoomJoinModal({
             <button
               type="submit"
               disabled={!inputCode.trim() || inputCode.trim().length < 3}
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-700 hover:to-teal-600 disabled:opacity-40 text-white font-extrabold text-sm rounded-2xl shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full py-3.5 px-4 bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-700 hover:to-teal-600 disabled:opacity-40 text-white font-extrabold text-sm rounded-2xl shadow-lg hover:shadow-xl transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
             >
               <span>Entrar na Chamada</span>
               <ArrowRight className="w-4 h-4" />

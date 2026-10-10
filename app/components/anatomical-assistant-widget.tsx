@@ -218,31 +218,31 @@ export function AnatomicalAssistantWidget({
         />
 
         {/* Overlay Superior de Controles de Câmera */}
-        <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/10 z-10 text-[11px] text-white/90">
+        <div className="absolute top-2.5 left-2.5 flex items-center gap-1 sm:gap-1.5 bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/10 z-10 text-[11px] text-white/90">
           <button
             onClick={() => handleResetCamera("FRONT")}
-            className="px-2 py-0.5 rounded-lg hover:bg-white/15 transition font-semibold"
+            className="px-2.5 py-1 rounded-lg hover:bg-white/15 transition font-semibold min-h-[36px] flex items-center"
             title="Visão Frontal da Palma"
           >
             Frontal
           </button>
           <button
             onClick={() => handleResetCamera("SIDE")}
-            className="px-2 py-0.5 rounded-lg hover:bg-white/15 transition font-semibold"
+            className="px-2.5 py-1 rounded-lg hover:bg-white/15 transition font-semibold min-h-[36px] flex items-center"
             title="Visão Lateral do Polegar"
           >
             Lateral
           </button>
           <button
             onClick={() => handleResetCamera("TOP")}
-            className="px-2 py-0.5 rounded-lg hover:bg-white/15 transition font-semibold"
+            className="px-2.5 py-1 rounded-lg hover:bg-white/15 transition font-semibold min-h-[36px] flex items-center"
             title="Visão Superior das Falanges"
           >
             Topo
           </button>
           <button
             onClick={handleToggleAutoRotate}
-            className={`px-2 py-0.5 rounded-lg transition font-semibold flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded-lg transition font-semibold flex items-center gap-1 min-h-[36px] ${
               isAutoRotating ? "bg-cyan-500 text-white" : "hover:bg-white/15"
             }`}
             title="Alternar rotação 360° contínua"
@@ -274,7 +274,7 @@ export function AnatomicalAssistantWidget({
             <>
               <button
                 onClick={handlePrevSign}
-                className="p-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+                className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
                 title="Sinal Anterior"
                 aria-label="Sinal anterior"
               >
@@ -282,7 +282,7 @@ export function AnatomicalAssistantWidget({
               </button>
               <button
                 onClick={handleTogglePlay}
-                className="px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition flex items-center gap-1 shadow-sm"
+                className="px-3.5 py-2 min-h-[40px] rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
                 aria-label={isPlaying ? "Pausar reprodução" : "Iniciar reprodução"}
               >
                 {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
@@ -290,7 +290,7 @@ export function AnatomicalAssistantWidget({
               </button>
               <button
                 onClick={handleNextSign}
-                className="p-1.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+                className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
                 title="Próximo Sinal"
                 aria-label="Próximo sinal"
               >
@@ -302,7 +302,7 @@ export function AnatomicalAssistantWidget({
           {/* Velocidade de Reprodução */}
           <button
             onClick={handleSpeedChange}
-            className="px-2.5 py-1 text-xs font-bold rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 transition"
+            className="px-3 py-2 min-h-[40px] text-xs font-bold rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 transition flex items-center justify-center"
             title="Ajustar velocidade de demonstração anatômica"
           >
             {speedMultiplier}x
@@ -355,7 +355,7 @@ export function AnatomicalAssistantWidget({
             </button>
             <button
               onClick={() => setCategoryTab("NUMBER")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+              className={`py-2 px-3 rounded-lg text-xs font-bold transition min-h-[38px] flex items-center justify-center ${
                 categoryTab === "NUMBER"
                   ? "bg-cyan-600 text-white shadow-sm"
                   : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:text-gray-900"
@@ -365,7 +365,7 @@ export function AnatomicalAssistantWidget({
             </button>
             <button
               onClick={() => setCategoryTab("WORDS")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+              className={`py-2 px-3 rounded-lg text-xs font-bold transition min-h-[38px] flex items-center justify-center ${
                 categoryTab === "WORDS"
                   ? "bg-cyan-600 text-white shadow-sm"
                   : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:text-gray-900"
@@ -377,13 +377,13 @@ export function AnatomicalAssistantWidget({
         </div>
 
         {/* Grade de Seleção Rápida */}
-        <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto p-1 rounded-xl bg-gray-50/50 dark:bg-gray-800/30 border border-gray-100 dark:border-gray-800">
+        <div className="flex flex-wrap gap-1.5 max-h-[150px] overflow-y-auto p-1.5 rounded-xl bg-gray-50/50 dark:bg-gray-800/30 border border-gray-100 dark:border-gray-800">
           {categoryTab === "ALPHABET" &&
             alphabetLetters.map((letra) => (
               <button
                 key={letra}
                 onClick={() => handleSelectDirectSign(letra)}
-                className={`w-8 h-8 rounded-lg text-xs font-extrabold transition flex items-center justify-center ${
+                className={`w-9 h-9 min-h-[36px] min-w-[36px] rounded-xl text-xs font-extrabold transition flex items-center justify-center cursor-pointer ${
                   activePoseId === letra
                     ? "bg-cyan-500 text-white shadow ring-2 ring-cyan-400/50"
                     : "bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-cyan-50 dark:hover:bg-cyan-950/40 border border-gray-200 dark:border-gray-700"
@@ -398,7 +398,7 @@ export function AnatomicalAssistantWidget({
               <button
                 key={num}
                 onClick={() => handleSelectDirectSign(num)}
-                className={`w-9 h-8 rounded-lg text-xs font-extrabold transition flex items-center justify-center ${
+                className={`w-9 h-9 min-h-[36px] min-w-[36px] rounded-xl text-xs font-extrabold transition flex items-center justify-center cursor-pointer ${
                   activePoseId === num
                     ? "bg-cyan-500 text-white shadow ring-2 ring-cyan-400/50"
                     : "bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-cyan-50 dark:hover:bg-cyan-950/40 border border-gray-200 dark:border-gray-700"
@@ -413,7 +413,7 @@ export function AnatomicalAssistantWidget({
               <button
                 key={word}
                 onClick={() => handleSelectDirectSign(word)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                className={`px-3.5 py-2 min-h-[36px] rounded-xl text-xs font-bold transition cursor-pointer ${
                   activePoseId === word
                     ? "bg-cyan-500 text-white shadow ring-2 ring-cyan-400/50"
                     : "bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-cyan-50 dark:hover:bg-cyan-950/40 border border-gray-200 dark:border-gray-700"

@@ -313,6 +313,12 @@ function ConversationalStation() {
   const [assistantText, setAssistantText] = useState("");
   const [autoCorrectToast, setAutoCorrectToast] = useState<string | null>(null);
 
+  // Estados de Responsividade e Navegação Mobile (< 1024px)
+  const [mobileTab, setMobileTab] = useState<"camera" | "chat" | "assistant">("camera");
+  const [cameraHudMessage, setCameraHudMessage] = useState<{ text: string; timestamp: string } | null>(null);
+  const [unreadChatBadge, setUnreadChatBadge] = useState<boolean>(false);
+  const cameraHudTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Modais
   const [isFreemiumOpen, setIsFreemiumOpen] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
@@ -382,6 +388,21 @@ function ConversationalStation() {
         console.error("Falha ao abrir câmera para chamada:", err);
       }
     }
+    if (!stream || !stream.active) {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#0f172a";
+          ctx.fillRect(0, 0, 640, 480);
+        }
+        if ("captureStream" in canvas) {
+          stream = (canvas as any).captureStream(5);
+        }
+      } catch {}
+    }
     setCallLocalStream(stream);
     setCallRoomCode(roomCode);
     setIsCallHost(true);
@@ -409,6 +430,21 @@ function ConversationalStation() {
       } catch (err) {
         console.error("Falha ao abrir câmera para chamada:", err);
       }
+    }
+    if (!stream || !stream.active) {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#0f172a";
+          ctx.fillRect(0, 0, 640, 480);
+        }
+        if ("captureStream" in canvas) {
+          stream = (canvas as any).captureStream(5);
+        }
+      } catch {}
     }
     setCallLocalStream(stream);
     setCallRoomCode(roomCode);
@@ -718,6 +754,19 @@ function ConversationalStation() {
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
     setMessages((m) => [...m, newMsg]);
+
+    // Dispara HUD de notificação para a pessoa surda se ela estiver na aba da câmera
+    if (mobileTab === "camera") {
+      setCameraHudMessage({
+        text,
+        timestamp: newMsg.timestamp,
+      });
+      setUnreadChatBadge(true);
+      if (cameraHudTimeoutRef.current) clearTimeout(cameraHudTimeoutRef.current);
+      cameraHudTimeoutRef.current = setTimeout(() => {
+        setCameraHudMessage(null);
+      }, 6000);
+    }
   };
 
   const copyToClipboard = (id: string, text: string) => {
@@ -733,16 +782,16 @@ function ConversationalStation() {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 flex flex-col items-center">
-      {/* --- BARRA SUPERIOR (HEADER) --- */}
+    <div className="min-h-[100dvh] bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 flex flex-col items-center">
+      {/* --- BARRA SUPERIOR (HEADER RESPONSIVO) --- */}
       <header className="w-full bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-40 backdrop-blur-md bg-opacity-90 dark:bg-opacity-90">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-teal-600 to-cyan-500 flex items-center justify-center text-white shadow-md">
-              <span className="text-xl">🤟</span>
+        <div className="max-w-6xl mx-auto px-3 sm:px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-teal-600 to-cyan-500 flex items-center justify-center text-white shadow-md shrink-0">
+              <span className="text-lg sm:text-xl">🤟</span>
             </div>
             <div>
-              <h1 className="font-extrabold text-lg sm:text-xl tracking-tight bg-gradient-to-r from-teal-600 to-cyan-600 bg-clip-text text-transparent">
+              <h1 className="font-extrabold text-base sm:text-xl tracking-tight bg-gradient-to-r from-teal-600 to-cyan-600 bg-clip-text text-transparent">
                 HandSpeak
               </h1>
               <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium hidden sm:block">
@@ -752,11 +801,11 @@ function ConversationalStation() {
           </div>
 
           {/* Controles do Topo */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             {/* Botão de Créditos Freemium / Pro */}
             <button
               onClick={() => setIsFreemiumOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition border border-gray-200 dark:border-gray-700"
+              className="flex items-center gap-1.5 px-3 py-2 sm:py-1.5 min-h-[40px] rounded-full text-xs font-semibold bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition border border-gray-200 dark:border-gray-700 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-teal-600" />
               <span>{isPro ? "PRO ⚡" : `${credits} IA`}</span>
@@ -765,39 +814,42 @@ function ConversationalStation() {
             {/* Chamada de Vídeo P2P */}
             <button
               onClick={() => setIsRoomModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-sm hover:brightness-110 transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 sm:py-1.5 min-h-[40px] rounded-full text-xs font-semibold bg-gradient-to-r from-teal-500 to-cyan-600 text-white shadow-sm hover:brightness-110 transition cursor-pointer"
               title="Iniciar ou Entrar em Chamada de Vídeo P2P"
             >
               <Video className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Vídeo Chamada P2P</span>
             </button>
 
-            {/* Assistente Anatômico 3D */}
+            {/* Assistente Anatômico 3D (exibido no topo a partir de telas médias) */}
             <button
-              onClick={() => setActiveSideTab((prev) => (prev === "assistant" ? "dialogue" : "assistant"))}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition border ${
+              onClick={() => {
+                setActiveSideTab((prev) => (prev === "assistant" ? "dialogue" : "assistant"));
+                setMobileTab("assistant");
+              }}
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] rounded-full text-xs font-semibold transition border ${
                 activeSideTab === "assistant"
                   ? "bg-cyan-600 text-white border-cyan-500 shadow-sm"
                   : "bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 border-cyan-200 dark:border-cyan-800"
               }`}
             >
               <span>🦾</span>
-              <span className="hidden sm:inline">Assistente 3D</span>
+              <span>Assistente 3D</span>
             </button>
 
-            {/* Guia de Libras */}
+            {/* Guia de Libras (exibido no topo a partir de telas médias) */}
             <button
               onClick={() => setIsGuideOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 hover:bg-teal-100 transition border border-teal-200 dark:border-teal-800"
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] rounded-full text-xs font-semibold bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 hover:bg-teal-100 transition border border-teal-200 dark:border-teal-800"
             >
               <BookOpen className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Guia de Libras</span>
+              <span>Guia de Libras</span>
             </button>
 
             {/* Configurações */}
             <button
               onClick={() => setIsFreemiumOpen(true)}
-              className="p-2 rounded-full text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+              className="p-2.5 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition cursor-pointer"
               aria-label="Configurações do modelo e áudio"
             >
               <Settings className="w-4 h-4" />
@@ -806,10 +858,10 @@ function ConversationalStation() {
         </div>
       </header>
 
-      {/* --- ÁREA PRINCIPAL DA ESTAÇÃO --- */}
-      <main className="max-w-6xl w-full px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* COLUNA ESQUERDA: CÂMERA & SINALIZADOR (7 Colunas) */}
-        <section className="lg:col-span-7 flex flex-col gap-5">
+      {/* --- ÁREA PRINCIPAL DA ESTAÇÃO (RESPONSIVA COM SAFE-AREA) --- */}
+      <main className="max-w-6xl w-full px-3 sm:px-4 py-4 sm:py-6 pb-28 lg:pb-8 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 flex-1">
+        {/* COLUNA ESQUERDA: CÂMERA & SINALIZADOR (7 Colunas no Desktop / Aba Câmera no Mobile) */}
+        <section className={`flex flex-col gap-5 lg:col-span-7 ${mobileTab === "camera" ? "flex" : "hidden lg:flex"}`}>
           {/* CÂMERA COM SKELETON E RECONHECIMENTO */}
           <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-xl border-2 border-gray-200 dark:border-gray-800">
             {!webcamRunning && (
@@ -845,12 +897,51 @@ function ConversationalStation() {
               className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 pointer-events-none"
             />
 
+            {/* BANNER FLUTUANTE HUD NA CÂMERA (RESPOSTA DO INTERLOCUTOR NO MOBILE) */}
+            {cameraHudMessage && (
+              <div className="absolute top-14 inset-x-3 z-40 animate-fade-in pointer-events-auto">
+                <div className="bg-black/90 backdrop-blur-md border border-cyan-400/60 rounded-2xl p-3 shadow-2xl flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                    <span className="text-xl shrink-0">✍️</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
+                        Interlocutor Digitou:
+                      </p>
+                      <p className="text-sm font-extrabold text-white truncate">
+                        {cameraHudMessage.text}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => {
+                        setMobileTab("chat");
+                        setActiveSideTab("dialogue");
+                        setUnreadChatBadge(false);
+                        setCameraHudMessage(null);
+                      }}
+                      className="px-2.5 py-1.5 bg-gradient-to-r from-teal-500 to-cyan-600 hover:brightness-110 text-white text-xs font-bold rounded-xl shadow transition min-h-[36px] flex items-center"
+                    >
+                      Ver Chat
+                    </button>
+                    <button
+                      onClick={() => setCameraHudMessage(null)}
+                      className="p-1.5 text-gray-400 hover:text-white rounded-lg transition min-h-[36px] min-w-[36px] flex items-center justify-center"
+                      aria-label="Fechar notificação"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* SELETOR DE MODO NA CÂMERA */}
             {webcamRunning && (
               <div className="absolute top-3 left-3 z-30 flex gap-1.5 bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/10">
                 <button
                   onClick={() => setMode("WORDS")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition min-h-[36px] flex items-center ${
                     mode === "WORDS" ? "bg-teal-500 text-white shadow" : "text-gray-300 hover:text-white"
                   }`}
                 >
@@ -858,7 +949,7 @@ function ConversationalStation() {
                 </button>
                 <button
                   onClick={() => setMode("ALPHABET")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition min-h-[36px] flex items-center ${
                     mode === "ALPHABET" ? "bg-teal-500 text-white shadow" : "text-gray-300 hover:text-white"
                   }`}
                 >
@@ -866,7 +957,7 @@ function ConversationalStation() {
                 </button>
                 <button
                   onClick={() => setMode("NUMBERS")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition min-h-[36px] flex items-center ${
                     mode === "NUMBERS" ? "bg-teal-500 text-white shadow" : "text-gray-300 hover:text-white"
                   }`}
                 >
@@ -880,7 +971,7 @@ function ConversationalStation() {
               <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
                 <button
                   onClick={() => setContrastEnhanced((v) => !v)}
-                  className={`p-2 rounded-xl backdrop-blur-md border transition ${
+                  className={`p-2.5 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl backdrop-blur-md border transition ${
                     contrastEnhanced
                       ? "bg-amber-500 text-white border-amber-400 shadow-md"
                       : "bg-black/60 text-white/80 hover:text-white border-white/10"
@@ -895,7 +986,7 @@ function ConversationalStation() {
                 </button>
                 <button
                   onClick={toggleWebcam}
-                  className="p-2 bg-black/60 backdrop-blur-md text-white/80 hover:text-white rounded-xl border border-white/10 transition"
+                  className="p-2.5 min-h-[40px] min-w-[40px] flex items-center justify-center bg-black/60 backdrop-blur-md text-white/80 hover:text-white rounded-xl border border-white/10 transition"
                   title="Pausar câmera"
                 >
                   <CameraOff className="w-4 h-4" />
@@ -977,35 +1068,36 @@ function ConversationalStation() {
               <span className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400 flex items-center gap-1.5">
                 <span>🤟</span> Sua Mensagem em Libras
               </span>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <button
                   onClick={handleSpace}
-                  className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 transition flex items-center gap-1"
+                  className="px-3.5 py-2 text-xs font-bold rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 transition flex items-center gap-1.5 min-h-[44px] cursor-pointer"
                 >
-                  <Space className="w-3.5 h-3.5" /> Espaço
+                  <Space className="w-4 h-4" /> <span>Espaço</span>
                 </button>
                 <button
                   onClick={handleBackspace}
-                  className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-gray-100 dark:bg-gray-800 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition flex items-center gap-1"
+                  className="px-3.5 py-2 text-xs font-bold rounded-xl bg-gray-100 dark:bg-gray-800 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition flex items-center gap-1.5 min-h-[44px] cursor-pointer"
+                  title="Apagar caractere"
                 >
-                  <Delete className="w-3.5 h-3.5" />
+                  <Delete className="w-4 h-4" />
                 </button>
                 <button
                   onClick={handleClear}
-                  className="px-2.5 py-1 text-xs font-semibold rounded-lg text-gray-400 hover:text-red-500 transition"
+                  className="p-2 text-xs font-bold rounded-xl text-gray-400 hover:text-red-500 transition min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
                   title="Limpar tudo"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
             {/* CAMPO DE TEXTO TRANSCRIÇÃO */}
-            <div className="min-h-[90px] p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-dashed border-gray-300 dark:border-gray-700 text-2xl font-mono text-gray-900 dark:text-gray-100 break-words flex items-center relative">
+            <div className="min-h-[90px] p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-dashed border-gray-300 dark:border-gray-700 text-xl sm:text-2xl font-mono text-gray-900 dark:text-gray-100 break-words flex items-center relative">
               {transcript ? (
                 <span>{transcript}</span>
               ) : (
-                <span className="text-gray-400 text-lg font-sans italic">
+                <span className="text-gray-400 text-base sm:text-lg font-sans italic">
                   Sinalize para a câmera para começar a escrever...
                 </span>
               )}
@@ -1014,21 +1106,21 @@ function ConversationalStation() {
 
             {/* TOAST SUTIL DE AUTOCORREÇÃO INTELIGENTE */}
             {autoCorrectToast && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300 text-xs font-semibold animate-fade-in shadow-sm">
-                <Sparkles className="w-3.5 h-3.5 text-teal-500" />
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300 text-xs font-semibold animate-fade-in shadow-sm">
+                <Sparkles className="w-3.5 h-3.5 text-teal-500 shrink-0" />
                 <span>{autoCorrectToast}</span>
               </div>
             )}
 
             {/* SUGESTÕES PREDITIVAS */}
             {suggestions.length > 0 && (
-              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 touch-pan-x">
                 <span className="text-xs text-gray-400 font-medium shrink-0">Sugestões:</span>
                 {suggestions.map((word) => (
                   <button
                     key={word}
                     onClick={() => handleApplySuggestion(word)}
-                    className="px-3 py-1 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 text-xs font-bold rounded-lg hover:bg-teal-100 border border-teal-200 dark:border-teal-800 transition shrink-0"
+                    className="px-3.5 py-2 min-h-[38px] bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 text-xs font-bold rounded-xl hover:bg-teal-100 border border-teal-200 dark:border-teal-800 transition shrink-0 flex items-center cursor-pointer"
                   >
                     {word}
                   </button>
@@ -1043,10 +1135,10 @@ function ConversationalStation() {
                 <button
                   onClick={handleRefineWithGemini}
                   disabled={isAiRefining || !transcript.trim()}
-                  className="px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-600 text-white text-xs font-bold rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition flex items-center gap-1.5"
+                  className="px-4 py-2.5 min-h-[44px] bg-gradient-to-r from-teal-500 to-cyan-600 text-white text-xs font-bold rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition flex items-center gap-2 cursor-pointer"
                 >
-                  <Sparkles className="w-4 h-4" />
-                  {isAiRefining ? "Refinando com IA..." : "Refinar Frase com IA"}
+                  <Sparkles className="w-4 h-4 shrink-0" />
+                  <span>{isAiRefining ? "Refinando com IA..." : "Refinar com IA"}</span>
                 </button>
               </div>
 
@@ -1054,10 +1146,10 @@ function ConversationalStation() {
               <button
                 onClick={handleSendTranscript}
                 disabled={!transcript.trim()}
-                className="px-5 py-2 bg-gray-900 dark:bg-teal-500 text-white dark:text-gray-950 text-xs font-extrabold rounded-xl shadow hover:bg-black transition flex items-center gap-2 disabled:opacity-40"
+                className="px-5 py-2.5 min-h-[44px] bg-gray-900 dark:bg-teal-500 text-white dark:text-gray-950 text-xs font-extrabold rounded-xl shadow hover:bg-black transition flex items-center gap-2 disabled:opacity-40 cursor-pointer"
               >
-                <Send className="w-4 h-4" />
-                Enviar para a Conversa
+                <Send className="w-4 h-4 shrink-0" />
+                <span>Enviar para a Conversa</span>
               </button>
             </div>
           </div>
@@ -1090,30 +1182,36 @@ function ConversationalStation() {
           </div>
         </section>
 
-        {/* COLUNA DIREITA: DIÁLOGO BILINGUE 100% VISUAL & ASSISTENTE ANATÔMICO 3D (5 Colunas) */}
-        <section className="lg:col-span-5 flex flex-col gap-4">
+        {/* COLUNA DIREITA: DIÁLOGO BILINGUE 100% VISUAL & ASSISTENTE ANATÔMICO 3D (5 Colunas no Desktop / Aba Conversa ou Assistente no Mobile) */}
+        <section className={`flex flex-col gap-4 lg:col-span-5 ${mobileTab !== "camera" ? "flex" : "hidden lg:flex"}`}>
           {/* SELETOR DE ABA DA COLUNA DIREITA */}
           <div className="flex items-center gap-1.5 p-1 bg-gray-200/70 dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700/60 shadow-inner">
             <button
-              onClick={() => setActiveSideTab("dialogue")}
-              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+              onClick={() => {
+                setActiveSideTab("dialogue");
+                setMobileTab("chat");
+              }}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 min-h-[42px] cursor-pointer ${
                 activeSideTab === "dialogue"
                   ? "bg-white dark:bg-gray-900 text-teal-600 dark:text-teal-400 shadow-sm"
                   : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
               }`}
             >
-              <MessageSquare className="w-3.5 h-3.5" />
+              <MessageSquare className="w-4 h-4" />
               <span>Diálogo em Tempo Real</span>
             </button>
             <button
-              onClick={() => setActiveSideTab("assistant")}
-              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+              onClick={() => {
+                setActiveSideTab("assistant");
+                setMobileTab("assistant");
+              }}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 min-h-[42px] cursor-pointer ${
                 activeSideTab === "assistant"
                   ? "bg-white dark:bg-gray-900 text-cyan-600 dark:text-cyan-400 shadow-sm"
                   : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
               }`}
             >
-              <span>🦾</span>
+              <span className="text-sm">🦾</span>
               <span>Assistente Anatômico 3D</span>
             </button>
           </div>
@@ -1121,10 +1219,13 @@ function ConversationalStation() {
           {activeSideTab === "assistant" ? (
             <AnatomicalAssistantWidget
               initialText={assistantText}
-              onClose={() => setActiveSideTab("dialogue")}
+              onClose={() => {
+                setActiveSideTab("dialogue");
+                setMobileTab("chat");
+              }}
             />
           ) : (
-            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-md border border-gray-200 dark:border-gray-800 p-5 flex flex-col flex-1 min-h-[580px]">
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-md border border-gray-200 dark:border-gray-800 p-4 sm:p-5 flex flex-col flex-1 min-h-[520px] lg:min-h-[580px]">
               {/* Cabeçalho do Diálogo */}
               <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800 mb-3">
                 <div className="flex items-center gap-2">
@@ -1147,17 +1248,17 @@ function ConversationalStation() {
                   {messages.length > 0 && (
                     <button
                       onClick={() => setMessages([])}
-                      className="text-xs text-gray-400 hover:text-red-500 transition p-1"
+                      className="text-xs text-gray-400 hover:text-red-500 transition p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg"
                       title="Limpar Diálogo"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   )}
                 </div>
               </div>
 
               {/* ÁREA DE MENSAGENS (CHAT COM ROLAGEM) */}
-              <div className="space-y-3 overflow-y-auto flex-1 min-h-[260px] max-h-[380px] pr-1 py-1">
+              <div className="space-y-3 overflow-y-auto flex-1 min-h-[260px] max-h-[46vh] lg:max-h-[380px] pr-1 py-1">
                 {messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center py-12 text-center text-gray-400 dark:text-gray-500">
                     <div className="w-12 h-12 rounded-2xl bg-gray-50 dark:bg-gray-800/60 flex items-center justify-center text-2xl mb-2">
@@ -1197,8 +1298,9 @@ function ConversationalStation() {
                                 onClick={() => {
                                   setAssistantText(g);
                                   setActiveSideTab("assistant");
+                                  setMobileTab("assistant");
                                 }}
-                                className="text-[10px] px-1.5 py-0.5 bg-black/20 hover:bg-black/40 rounded font-bold transition flex items-center gap-0.5"
+                                className="text-[10px] px-2 py-1 bg-black/20 hover:bg-black/40 rounded-lg font-bold transition flex items-center gap-1 cursor-pointer min-h-[30px]"
                                 title="Ver no Assistente 3D"
                               >
                                 <span>{g}</span>
@@ -1213,22 +1315,23 @@ function ConversationalStation() {
                             onClick={() => {
                               setAssistantText(msg.text);
                               setActiveSideTab("assistant");
+                              setMobileTab("assistant");
                             }}
-                            className="p-1 hover:opacity-80 transition text-cyan-600 dark:text-cyan-300"
+                            className="p-1.5 hover:opacity-80 transition text-cyan-600 dark:text-cyan-300 min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer"
                             title="Demonstrar sinal no Assistente Anatômico 3D"
                             aria-label="Demonstrar sinal no Assistente Anatômico 3D"
                           >
-                            <Sparkles className="w-3.5 h-3.5" />
+                            <Sparkles className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => copyToClipboard(msg.id, msg.text)}
-                            className="p-1 hover:opacity-80 transition"
+                            className="p-1.5 hover:opacity-80 transition min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer"
                             title="Copiar texto"
                           >
                             {copiedId === msg.id ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <Check className="w-4 h-4 text-emerald-400" />
                             ) : (
-                              <Copy className="w-3.5 h-3.5" />
+                              <Copy className="w-4 h-4" />
                             )}
                           </button>
                         </div>
@@ -1256,8 +1359,9 @@ function ConversationalStation() {
                         onClick={() => {
                           setAssistantText(gloss);
                           setActiveSideTab("assistant");
+                          setMobileTab("assistant");
                         }}
-                        className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/50 dark:hover:bg-amber-900/80 text-amber-950 dark:text-amber-200 font-black text-xs rounded-lg border border-amber-300 dark:border-amber-700 shadow-sm transition flex items-center gap-1 cursor-pointer"
+                        className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/50 dark:hover:bg-amber-900/80 text-amber-950 dark:text-amber-200 font-black text-xs rounded-lg border border-amber-300 dark:border-amber-700 shadow-sm transition flex items-center gap-1 cursor-pointer min-h-[36px]"
                         title={`Visualizar anatomia 3D de: ${gloss}`}
                       >
                         <span>{gloss}</span>
@@ -1276,14 +1380,14 @@ function ConversationalStation() {
                     value={listenerInputText}
                     onChange={(e) => setListenerInputText(e.target.value)}
                     placeholder="Digite sua mensagem para a pessoa surda..."
-                    className="flex-1 px-4 py-2.5 text-xs bg-gray-50 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 shadow-inner"
+                    className="flex-1 px-4 py-3 min-h-[46px] text-xs sm:text-sm bg-gray-50 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 shadow-inner"
                   />
                   <button
                     type="submit"
                     disabled={!listenerInputText.trim()}
-                    className="px-4 py-2.5 bg-gradient-to-r from-teal-500 to-cyan-600 hover:brightness-110 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow transition flex items-center gap-1.5 shrink-0"
+                    className="px-5 py-3 min-h-[46px] min-w-[46px] bg-gradient-to-r from-teal-500 to-cyan-600 hover:brightness-110 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow transition flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
                   >
-                    <Send className="w-3.5 h-3.5" />
+                    <Send className="w-4 h-4" />
                     <span>Enviar</span>
                   </button>
                 </form>
@@ -1297,13 +1401,16 @@ function ConversationalStation() {
         </section>
       </main>
 
-      {/* --- MODAL DO GUIA VISUAL DE LIBRAS --- */}
+      {/* --- MODAL DO GUIA VISUAL DE LIBRAS (BOTTOM SHEET NO MOBILE) --- */}
       {isGuideOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 flex flex-col max-h-[85vh]">
-            <div className="p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-t-3xl sm:rounded-2xl shadow-2xl border-t sm:border border-gray-200 dark:border-gray-800 flex flex-col max-h-[92dvh] sm:max-h-[85vh] pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:pb-0">
+            {/* Puxador visual para mobile */}
+            <div className="w-12 h-1.5 bg-gray-300 dark:bg-gray-700 rounded-full mx-auto mt-2.5 sm:hidden" />
+
+            <div className="p-4 sm:p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
                   <BookOpen className="w-5 h-5 text-teal-600" /> Guia e Referência de Libras
                 </h3>
                 <p className="text-xs text-gray-500">
@@ -1312,17 +1419,18 @@ function ConversationalStation() {
               </div>
               <button
                 onClick={() => setIsGuideOpen(false)}
-                className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                className="p-2.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                aria-label="Fechar guia"
               >
                 ✕
               </button>
             </div>
 
             {/* Filtros */}
-            <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex gap-2">
+            <div className="px-4 sm:px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex gap-2 overflow-x-auto touch-pan-x">
               <button
                 onClick={() => setGuideFilter("todos")}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition min-h-[38px] flex items-center cursor-pointer shrink-0 ${
                   guideFilter === "todos" ? "bg-teal-600 text-white" : "bg-gray-100 dark:bg-gray-800"
                 }`}
               >
@@ -1330,7 +1438,7 @@ function ConversationalStation() {
               </button>
               <button
                 onClick={() => setGuideFilter("alfabeto")}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition min-h-[38px] flex items-center cursor-pointer shrink-0 ${
                   guideFilter === "alfabeto" ? "bg-teal-600 text-white" : "bg-gray-100 dark:bg-gray-800"
                 }`}
               >
@@ -1338,7 +1446,7 @@ function ConversationalStation() {
               </button>
               <button
                 onClick={() => setGuideFilter("sinais")}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition min-h-[38px] flex items-center cursor-pointer shrink-0 ${
                   guideFilter === "sinais" ? "bg-teal-600 text-white" : "bg-gray-100 dark:bg-gray-800"
                 }`}
               >
@@ -1432,6 +1540,77 @@ function ConversationalStation() {
           setMessages((m) => [...m, newMsg]);
         }}
       />
+
+      {/* --- BARRA DE NAVEGAÇÃO INFERIOR (BOTTOM NAV DOCK - MOBILE APENAS < 1024px) --- */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-t border-gray-200 dark:border-gray-800 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 px-3 shadow-2xl">
+        <div className="max-w-md mx-auto grid grid-cols-4 gap-1">
+          {/* Aba Câmera */}
+          <button
+            onClick={() => setMobileTab("camera")}
+            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition min-h-[48px] cursor-pointer ${
+              mobileTab === "camera"
+                ? "text-teal-600 dark:text-teal-400 font-bold bg-teal-50/80 dark:bg-teal-950/50"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+            }`}
+          >
+            <div className="relative">
+              <Camera className="w-5 h-5" />
+              {webcamRunning && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 animate-pulse ring-2 ring-white dark:ring-gray-900" />
+              )}
+            </div>
+            <span className="text-[10px] mt-1 font-medium">Câmera</span>
+          </button>
+
+          {/* Aba Conversa */}
+          <button
+            onClick={() => {
+              setMobileTab("chat");
+              setActiveSideTab("dialogue");
+              setUnreadChatBadge(false);
+              setCameraHudMessage(null);
+            }}
+            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition min-h-[48px] cursor-pointer ${
+              mobileTab === "chat"
+                ? "text-teal-600 dark:text-teal-400 font-bold bg-teal-50/80 dark:bg-teal-950/50"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+            }`}
+          >
+            <div className="relative">
+              <MessageSquare className="w-5 h-5" />
+              {unreadChatBadge && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-cyan-500 ring-2 ring-white dark:ring-gray-900 animate-bounce" />
+              )}
+            </div>
+            <span className="text-[10px] mt-1 font-medium">Conversa</span>
+          </button>
+
+          {/* Aba Assistente 3D */}
+          <button
+            onClick={() => {
+              setMobileTab("assistant");
+              setActiveSideTab("assistant");
+            }}
+            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition min-h-[48px] cursor-pointer ${
+              mobileTab === "assistant"
+                ? "text-cyan-600 dark:text-cyan-400 font-bold bg-cyan-50/80 dark:bg-cyan-950/50"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+            }`}
+          >
+            <span className="text-lg leading-none">🦾</span>
+            <span className="text-[10px] mt-1 font-medium">Tutor 3D</span>
+          </button>
+
+          {/* Aba Guia de Libras */}
+          <button
+            onClick={() => setIsGuideOpen(true)}
+            className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition min-h-[48px] text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 cursor-pointer"
+          >
+            <BookOpen className="w-5 h-5" />
+            <span className="text-[10px] mt-1 font-medium">Guia</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }
