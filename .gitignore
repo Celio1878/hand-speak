@@ -1,9 +1,48 @@
+# Operating System files
 .DS_Store
-.env
-/node_modules/
+Thumbs.db
+*.swp
+*~
 
-# React Router
+# Environment variables & secrets (NEVER commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+
+# Node & Package Managers (Bun is used exclusively)
+/node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# React Router & Build outputs
 /.react-router/
 /build/
-.idea
-.vercel
+/dist/
+/.cache/
+
+# IDE & Editor folders
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sublime-workspace
+
+# Hosting & Serverless caches
+.vercel/
+.netlify/
+
+# Test coverage & logs
+/coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+bun-debug.log*
+
+# Redundant assets directory
+/app/assets/
