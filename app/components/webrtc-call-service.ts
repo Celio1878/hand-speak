@@ -22,11 +22,23 @@ export const COMPREHENSION_REACTIONS: ComprehensionReactionMeta[] = [
   { id: "question", label: "Tenho uma dúvida", emoji: "❓", shortText: "Tenho dúvida" },
 ];
 
+import type { ViolationCategory } from "./video-safety-guard";
+
 export type P2PPayload =
   | { type: "transcript"; text: string; sender: "signer" | "listener"; timestamp?: string }
   | { type: "reaction"; reaction: ComprehensionReactionType; timestamp?: string }
   | { type: "chat"; text: string; sender: "signer" | "listener"; timestamp?: string }
-  | { type: "glosses"; glosses: string[] };
+  | { type: "glosses"; glosses: string[] }
+  | {
+      type: "safety_violation";
+      category: ViolationCategory;
+      reason?: string;
+      timestamp?: string;
+    }
+  | {
+      type: "quota_exceeded";
+      timestamp?: string;
+    };
 
 export type CallStatus = "idle" | "connecting" | "connected" | "disconnected" | "error";
 

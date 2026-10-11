@@ -129,6 +129,10 @@ export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps)
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                     15 traduções inteligentes com IA diárias
                   </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    Até 5 minutos de videochamada P2P por dia
+                  </li>
                 </ul>
               </div>
             </div>
@@ -143,6 +147,10 @@ export function FreemiumModal({ isOpen, onClose, onUpdate }: FreemiumModalProps)
                   {PRO_PRICE_BRL} / mês
                 </p>
                 <ul className="mt-3 space-y-2 text-xs text-gray-700 dark:text-gray-200">
+                  <li className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-teal-500 shrink-0" />
+                    Videochamadas P2P ilimitadas com moderação contínua
+                  </li>
                   <li className="flex items-center gap-2">
                     <Zap className="w-4 h-4 text-teal-500 shrink-0" />
                     Traduções inteligentes com IA ilimitadas

@@ -8,6 +8,11 @@ import {
 } from "./webrtc-call-service";
 import { VideoSafetyGuard, type VideoSafetyViolation } from "./video-safety-guard";
 import {
+  isProUser,
+  getRemainingVideoSeconds,
+  consumeVideoSeconds,
+} from "./freemium-service";
+import {
   PhoneOff,
   Video,
   VideoOff,
@@ -17,6 +22,8 @@ import {
   Users,
   ShieldAlert,
   Play,
+  Clock,
+  Sparkles,
 } from "lucide-react";
 
 interface P2PVideoCallModalProps {
@@ -51,9 +58,15 @@ export function P2PVideoCallModal({
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
 
-  // Estados de Moderação e Segurança de Vídeo
+  // Estados de Moderação e Segurança de Vídeo (Local e Remoto)
   const [safetyViolation, setSafetyViolation] = useState<VideoSafetyViolation | null>(null);
-  const safetyGuardRef = useRef<VideoSafetyGuard | null>(null);
+  const localSafetyGuardRef = useRef<VideoSafetyGuard | null>(null);
+  const remoteSafetyGuardRef = useRef<VideoSafetyGuard | null>(null);
+
+  // Cota Diária de Vídeo para Usuários Free (5 minutos = 300 segundos)
+  const isPro = isProUser();
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(getRemainingVideoSeconds());
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
 
   // Estados de Legendas Flutuantes e Chat
   const [activeSubtitle, setActiveSubtitle] = useState<{
@@ -73,31 +86,82 @@ export function P2PVideoCallModal({
   const callServiceRef = useRef<WebRTCCallService | null>(null);
   const subtitleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleTriggerSafetyBlock = (violation: VideoSafetyViolation) => {
+  const handleTriggerSafetyBlock = (
+    violation: VideoSafetyViolation,
+    source: "local" | "remote" = "local"
+  ) => {
     setSafetyViolation(violation);
 
-    // 1. Oculta e para imediatamente o vídeo remoto
+    // 1. Notifica o interlocutor via P2P se a violação foi originada localmente
+    if (source === "local" && callServiceRef.current) {
+      try {
+        callServiceRef.current.sendPayload({
+          type: "safety_violation",
+          category: violation.category,
+          reason: violation.reason,
+        });
+      } catch {}
+    }
+
+    // 2. Desliga imediatamente os tracks de hardware da câmera local
+    if (localStream) {
+      try {
+        localStream.getTracks().forEach((track) => {
+          track.stop();
+          track.enabled = false;
+        });
+      } catch {}
+    }
+    localSafetyGuardRef.current?.stopHardware();
+
+    // 3. Oculta e para imediatamente o vídeo remoto
     if (remoteVideoRef.current) {
       remoteVideoRef.current.pause();
       remoteVideoRef.current.srcObject = null;
     }
 
-    // 2. Interrompe a guarda de inspeção
-    if (safetyGuardRef.current) {
-      safetyGuardRef.current.stop();
-      safetyGuardRef.current = null;
+    // 4. Interrompe as guardas de inspeção local e remota
+    if (localSafetyGuardRef.current) {
+      localSafetyGuardRef.current.stop();
+      localSafetyGuardRef.current = null;
+    }
+    if (remoteSafetyGuardRef.current) {
+      remoteSafetyGuardRef.current.stop();
+      remoteSafetyGuardRef.current = null;
     }
 
-    // 3. Corta imediatamente a chamada WebRTC P2P
+    // 5. Corta imediatamente a chamada WebRTC P2P
     if (callServiceRef.current) {
       callServiceRef.current.disconnect();
     }
 
-    // 4. Vibração de alerta de emergência
+    // 6. Vibração de alerta de emergência
     if (navigator.vibrate) {
       navigator.vibrate([100, 50, 100, 50, 200]);
     }
   };
+
+  // Monitor de Cota de Vídeo Free (5 minutos por dia)
+  useEffect(() => {
+    if (!isOpen || callStatus !== "connected" || isPro || safetyViolation || isQuotaExceeded) return;
+
+    const timer = setInterval(() => {
+      const left = getRemainingVideoSeconds();
+      if (left <= 0) {
+        setIsQuotaExceeded(true);
+        try {
+          callServiceRef.current?.sendPayload({ type: "quota_exceeded" });
+        } catch {}
+        if (callServiceRef.current) callServiceRef.current.disconnect();
+        clearInterval(timer);
+      } else {
+        consumeVideoSeconds(1);
+        setRemainingSeconds((prev) => Math.max(0, prev - 1));
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isOpen, callStatus, isPro, safetyViolation, isQuotaExceeded]);
 
   // Inicializa o serviço WebRTC P2P
   useEffect(() => {
@@ -105,6 +169,7 @@ export function P2PVideoCallModal({
 
     setErrorMessage(null);
     setSafetyViolation(null);
+    setIsQuotaExceeded(false);
     setCallStatus("connecting");
     setStatusDetail(isHost ? "Iniciando sala..." : "Conectando à sala...");
     setRemoteStream(null);
@@ -143,22 +208,39 @@ export function P2PVideoCallModal({
       service.joinRoom(roomCode, localStream);
     }
 
-    // Configura o vídeo local
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream;
-    }
-
     return () => {
-      if (safetyGuardRef.current) {
-        safetyGuardRef.current.stop();
-        safetyGuardRef.current = null;
+      if (localSafetyGuardRef.current) {
+        localSafetyGuardRef.current.stop();
+        localSafetyGuardRef.current = null;
+      }
+      if (remoteSafetyGuardRef.current) {
+        remoteSafetyGuardRef.current.stop();
+        remoteSafetyGuardRef.current = null;
       }
       service.disconnect();
       callServiceRef.current = null;
     };
   }, [isOpen, roomCode, isHost, localStream]);
 
-  // Atualiza stream remoto no vídeo e conecta o VideoSafetyGuard
+  // Atualiza stream local no vídeo e conecta o VideoSafetyGuard local
+  useEffect(() => {
+    if (localVideoRef.current && localStream && !safetyViolation) {
+      localVideoRef.current.srcObject = localStream;
+
+      const guard = new VideoSafetyGuard((violation) => {
+        handleTriggerSafetyBlock(violation, "local");
+      });
+      localSafetyGuardRef.current = guard;
+      guard.start(localVideoRef.current, localStream);
+
+      return () => {
+        guard.stop();
+        localSafetyGuardRef.current = null;
+      };
+    }
+  }, [localStream, safetyViolation]);
+
+  // Atualiza stream remoto no vídeo e conecta o VideoSafetyGuard remoto
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream && !safetyViolation) {
       if (remoteVideoRef.current.srcObject !== remoteStream) {
@@ -169,26 +251,19 @@ export function P2PVideoCallModal({
         setIsAutoplayBlocked(true);
       });
 
-      // Inicia o guarda de segurança e moderação em tempo real
+      // Inicia o guarda de segurança e moderação no vídeo remoto
       const guard = new VideoSafetyGuard((violation) => {
-        handleTriggerSafetyBlock(violation);
+        handleTriggerSafetyBlock(violation, "remote");
       });
-      safetyGuardRef.current = guard;
-      guard.start(remoteVideoRef.current);
+      remoteSafetyGuardRef.current = guard;
+      guard.start(remoteVideoRef.current, remoteStream);
 
       return () => {
         guard.stop();
-        safetyGuardRef.current = null;
+        remoteSafetyGuardRef.current = null;
       };
     }
   }, [remoteStream, safetyViolation]);
-
-  // Atualiza stream local no elemento
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-    }
-  }, [localStream]);
 
   // Sincroniza a transcrição de Libras local como legenda flutuante remota em tempo real
   useEffect(() => {
@@ -221,6 +296,20 @@ export function P2PVideoCallModal({
       const meta = COMPREHENSION_REACTIONS.find((r) => r.id === payload.reaction);
       if (meta) {
         triggerReactionBadge(meta.emoji, meta.shortText, "remote");
+      }
+    } else if (payload.type === "safety_violation") {
+      handleTriggerSafetyBlock(
+        {
+          category: payload.category,
+          confidence: 1.0,
+          reason: payload.reason || "Chamada encerrada pelo sistema por violação de segurança no vídeo do interlocutor.",
+        },
+        "remote"
+      );
+    } else if (payload.type === "quota_exceeded") {
+      setIsQuotaExceeded(true);
+      if (callServiceRef.current) {
+        callServiceRef.current.disconnect();
       }
     }
   };
@@ -346,6 +435,23 @@ export function P2PVideoCallModal({
                 : statusDetail || (callStatus === "connecting" ? "Conectando..." : "Aguardando...")}
             </span>
           </div>
+
+          {/* Badge de cota restante de vídeo para usuários Free (5 min) */}
+          {!isPro && callStatus === "connected" && (
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] sm:text-[11px] font-mono font-bold ${
+                remainingSeconds <= 60
+                  ? "bg-red-500/20 border-red-500/40 text-red-300 animate-pulse"
+                  : "bg-amber-500/20 border-amber-400/40 text-amber-300"
+              }`}
+              title="Tempo restante de vídeo hoje no plano gratuito"
+            >
+              <Clock className="w-3 h-3" />
+              <span>
+                {Math.floor(remainingSeconds / 60)}:{(remainingSeconds % 60).toString().padStart(2, "0")} (Free)
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
@@ -402,13 +508,19 @@ export function P2PVideoCallModal({
             <p className="text-xs sm:text-sm text-red-200 max-w-md mb-6 leading-relaxed">
               O sistema de proteção em tempo real identificou conteúdo em desacordo com as diretrizes de integridade (
               {safetyViolation.category === "sexual"
-                ? "conteúdo explícito ou nudez"
+                ? "conteúdo sexual explícito ou partes íntimas"
+                : safetyViolation.category === "drugs"
+                ? "drogas ilícitas, entorpecentes ou parafernália"
                 : safetyViolation.category === "violence"
-                ? "violência física ou brutalidade"
+                ? "violência física, brutalidade ou sangue"
+                : safetyViolation.category === "terror"
+                ? "extremismo violento ou ameaça terrorista"
                 : safetyViolation.category === "weapons"
                 ? "ameaça ou presença de armas"
                 : safetyViolation.category === "child_safety"
                 ? "segurança e proteção de menores"
+                : safetyViolation.category === "alcohol_tobacco"
+                ? "consumo ostensivo de bebidas alcoólicas ou tabaco/vapes"
                 : "conteúdo impróprio"}
               ). A transmissão de vídeo e a chamada P2P foram cortadas imediatamente.
             </p>
@@ -417,6 +529,27 @@ export function P2PVideoCallModal({
               className="px-6 py-3 bg-white hover:bg-gray-100 text-red-950 font-black text-xs rounded-2xl shadow-xl transition cursor-pointer"
             >
               Sair da Chamada
+            </button>
+          </div>
+        )}
+
+        {/* ESCUDO DE COTA DIÁRIA EXCEDIDA (5 MINUTOS NO PLANO FREE) */}
+        {isQuotaExceeded && !safetyViolation && (
+          <div className="absolute inset-0 z-50 bg-gray-950/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+            <div className="w-20 h-20 rounded-full bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center text-amber-400 mb-4 shadow-2xl animate-pulse">
+              <Clock className="w-10 h-10" />
+            </div>
+            <h2 className="text-xl sm:text-2xl font-black text-white mb-2">
+              Cota Diária de Vídeo Atingida (5 min)
+            </h2>
+            <p className="text-xs sm:text-sm text-gray-300 max-w-md mb-6 leading-relaxed">
+              Você utilizou os 5 minutos diários de videochamada gratuitos de hoje. Sua cota será renovada à meia-noite. Assine o Plano Pro (R$ 24,90/mês) para videochamadas ilimitadas.
+            </p>
+            <button
+              onClick={handleEndCall}
+              className="px-6 py-3 bg-gradient-to-r from-teal-500 to-cyan-600 hover:brightness-110 text-white font-extrabold text-xs rounded-2xl shadow-xl transition cursor-pointer"
+            >
+              Concluir Chamada
             </button>
           </div>
         )}

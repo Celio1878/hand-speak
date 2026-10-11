@@ -217,32 +217,47 @@ export function AnatomicalAssistantWidget({
           title="Clique e arraste com o mouse para girar em 360°"
         />
 
-        {/* Overlay Superior de Controles de Câmera */}
-        <div className="absolute top-2.5 left-2.5 flex items-center gap-1 sm:gap-1.5 bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/10 z-10 text-[11px] text-white/90">
+        {/* Badge do Sinal no Topo Direito (Livre de qualquer colisão) */}
+        <div className="absolute top-2.5 right-2.5 bg-black/75 backdrop-blur-md px-3 py-1.5 rounded-xl border border-cyan-500/30 text-right z-10 shadow-lg">
+          <span className="text-[10px] uppercase font-bold text-cyan-400 block tracking-wider">
+            Sinal Exibido
+          </span>
+          <span className="text-base font-black text-white">{currentPose.label}</span>
+        </div>
+
+        {/* Dica de Interação no Rodapé Esquerdo */}
+        <div className="absolute bottom-2.5 left-2.5 pointer-events-none bg-black/50 backdrop-blur-sm px-2.5 py-1 rounded-lg border border-white/10 text-[10px] text-gray-300 flex items-center gap-1.5 z-10">
+          <Eye className="w-3 h-3 text-cyan-400 shrink-0" />
+          <span className="hidden sm:inline">Arraste para inspecionar em 360° | Scroll para zoom</span>
+          <span className="sm:hidden">Girar 3D</span>
+        </div>
+
+        {/* Controles de Câmera na Base Inferior Direita */}
+        <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1 sm:gap-1.5 bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/10 z-10 text-[11px] text-white/90 shadow-lg">
           <button
             onClick={() => handleResetCamera("FRONT")}
-            className="px-2.5 py-1 rounded-lg hover:bg-white/15 transition font-semibold min-h-[36px] flex items-center"
+            className="px-2 sm:px-2.5 py-1 rounded-lg hover:bg-white/15 transition font-semibold min-h-[36px] flex items-center"
             title="Visão Frontal da Palma"
           >
             Frontal
           </button>
           <button
             onClick={() => handleResetCamera("SIDE")}
-            className="px-2.5 py-1 rounded-lg hover:bg-white/15 transition font-semibold min-h-[36px] flex items-center"
+            className="px-2 sm:px-2.5 py-1 rounded-lg hover:bg-white/15 transition font-semibold min-h-[36px] flex items-center"
             title="Visão Lateral do Polegar"
           >
             Lateral
           </button>
           <button
             onClick={() => handleResetCamera("TOP")}
-            className="px-2.5 py-1 rounded-lg hover:bg-white/15 transition font-semibold min-h-[36px] flex items-center"
+            className="px-2 sm:px-2.5 py-1 rounded-lg hover:bg-white/15 transition font-semibold min-h-[36px] flex items-center"
             title="Visão Superior das Falanges"
           >
             Topo
           </button>
           <button
             onClick={handleToggleAutoRotate}
-            className={`px-2.5 py-1 rounded-lg transition font-semibold flex items-center gap-1 min-h-[36px] ${
+            className={`px-2 sm:px-2.5 py-1 rounded-lg transition font-semibold flex items-center gap-1 min-h-[36px] ${
               isAutoRotating ? "bg-cyan-500 text-white" : "hover:bg-white/15"
             }`}
             title="Alternar rotação 360° contínua"
@@ -250,20 +265,6 @@ export function AnatomicalAssistantWidget({
             <RotateCcw className="w-3 h-3" />
             360°
           </button>
-        </div>
-
-        {/* Badge do Sinal no Topo Direito */}
-        <div className="absolute top-2.5 right-2.5 bg-black/75 backdrop-blur-md px-3 py-1.5 rounded-xl border border-cyan-500/30 text-right z-10">
-          <span className="text-[10px] uppercase font-bold text-cyan-400 block tracking-wider">
-            Sinal Exibido
-          </span>
-          <span className="text-base font-black text-white">{currentPose.label}</span>
-        </div>
-
-        {/* Dica de Interação no Rodapé do Viewport */}
-        <div className="absolute bottom-2.5 left-2.5 pointer-events-none bg-black/50 backdrop-blur-sm px-2.5 py-1 rounded-lg border border-white/10 text-[10px] text-gray-300 flex items-center gap-1.5">
-          <Eye className="w-3 h-3 text-cyan-400" />
-          <span>Arraste para inspecionar em 360° | Scroll para zoom</span>
         </div>
       </div>
 
